@@ -1,0 +1,21 @@
+[package]
+name = "doas"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+block2 = { version = "0.6.2", default-features = false, features = ["alloc"] }
+clap = { version = "4.6.0", features = ["derive"] }
+libc = "0.2.183"
+objc2 = { version = "0.6.4", default-features = false }
+objc2-foundation = { version = "0.3.2", default-features = false }
+objc2-local-authentication = { version = "0.3.2", default-features = false, features = ["LAContext", "block2"] }
+rand = "0.10.0"
+zeroize = { version = "1.8.2", features = ["std"] }
+
+[profile.release]
+strip = true
+panic = "abort"
+
+[build-dependencies]
+bindgen = "0.71.0"
