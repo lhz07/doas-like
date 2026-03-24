@@ -1,10 +1,10 @@
 use clap::Parser;
 use doas::{
-    CNAME, CONF_PATH,
+    CNAME, CONF_PATH, TIMEOUT,
     c::{self},
     command::CliArgs,
     config::{Config, check_config, permit},
-    errprint, errx, verify,
+    errprint, errx, timestamp, verify,
 };
 use std::{
     env,
@@ -17,15 +17,16 @@ fn inner_main() -> Result<(), ()> {
     let real_uid = c::getuid();
     let origin_euid = c::geteuid();
 
-    // downgrade to real uid
-    c::seteuid(real_uid)?;
-
     c::setprogname(CNAME);
-    // no need to close fds, because std::process::Command
-    // will do it
+    // no need to close fds, because std::process::Command will do it
 
     // parse args
     let args = CliArgs::parse();
+
+    if args.clear {
+        return timestamp::clear();
+    }
+
     let target_uid = match args.user {
         Some(uid) => c::parse_uid(&uid).inspect_err(|_| errprint!("unknown user"))?,
         None => 0,
@@ -47,7 +48,6 @@ fn inner_main() -> Result<(), ()> {
     };
 
     if let Some(path) = args.config {
-        c::setreuid(real_uid, real_uid)?;
         return check_config(&path, real_uid, &groups, target_uid, &argvs);
     }
 
@@ -58,6 +58,7 @@ fn inner_main() -> Result<(), ()> {
     if origin_euid != 0 {
         errx!("not installed setuid");
     }
+
     let config = match Config::parse(CONF_PATH, true) {
         Ok(c) => c,
         Err(e) => errx!("config error: {e}"),
@@ -70,19 +71,37 @@ fn inner_main() -> Result<(), ()> {
 
     let myname = unsafe { CStr::from_ptr(mypw.pw_name) };
     let target_user = unsafe { CStr::from_ptr(target_pw.pw_name) };
-    if !rule.options.nopass {
+    let mut persist_file = None;
+    let persist_pass = {
+        if rule.options.persist
+            && let Ok(file) = timestamp::open(TIMEOUT)
+        {
+            let file = persist_file.insert(file);
+            timestamp::check(file, TIMEOUT).is_ok_and(|b| b)
+        } else {
+            false
+        }
+    };
+    if !rule.options.nopass && !persist_pass {
+        if args.non_interactive {
+            errx!("Authentication required");
+        }
+        // downgrade to real uid
+        c::seteuid(real_uid)?;
         // authenticate user
         verify::auth(target_user, myname)?;
+        // upgrade to euid
+        c::setreuid(0, 0)?;
     }
-
-    // upgrade to euid
-    c::setreuid(0, 0)?;
+    if let Some(file) = persist_file {
+        let _ = timestamp::set(&file, TIMEOUT);
+    }
 
     c::setregid(target_pw.pw_gid, target_pw.pw_gid)?;
     unsafe { c::initgroups(target_pw.pw_name, target_pw.pw_gid as i32)? };
     c::setreuid(target_uid, target_uid)?;
     let envs = c::prep_env(&mypw, &target_pw);
-    let err = std::process::Command::new(cmd)
+    let err = process::Command::new(cmd)
         .args(cmd_args)
         .env_clear()
         .envs(envs)

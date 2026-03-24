@@ -10,28 +10,40 @@ use std::ffi::OsString;
 )]
 pub struct CliArgs {
     /// Config path
+    ///
+    /// Parse and check the configuration file config, then exit. If command is supplied,
+    /// doas will also perform command matching. In the latter case either ‘permit’,
+    /// ‘permit nopass’ or ‘deny’ will be printed on standard output, depending on
+    /// command matching results. No command is executed.
     #[arg(short = 'C')]
+    #[arg(long_help)]
+    #[arg(verbatim_doc_comment)]
     pub config: Option<String>,
 
-    /// Run command as user
+    /// User name or uid
+    ///
+    /// Execute the command as user. The default is root.
     #[arg(short = 'u', long)]
     pub user: Option<String>,
 
-    /// Do not prompt for password
+    /// Non interactive mode, fail if the matching rule doesn't have the nopass option.
     #[arg(short = 'n')]
     pub non_interactive: bool,
 
-    /// Run a shell
+    /// Execute the shell from SHELL or /etc/passwd.
     #[arg(short = 's', conflicts_with = "command")]
     pub shell: bool,
 
-    /// Validate credentials
-    #[arg(short = 'v', conflicts_with = "command")]
-    pub validate: bool,
+    /// Clear any persisted authentications from previous invocations, then immediately
+    /// exit. No command is executed.
+    #[arg(long_help)]
+    #[arg(verbatim_doc_comment)]
+    #[arg(short = 'L', conflicts_with = "command")]
+    pub clear: bool,
 
     /// Command to run
     #[arg(
-        required_unless_present = "validate",
+        required_unless_present = "clear",
         required_unless_present = "shell",
         required_unless_present = "config"
     )]

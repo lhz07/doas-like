@@ -1,16 +1,17 @@
-use libc::{c_char, c_int, gid_t, uid_t};
+use crate::{
+    bindings::{self, pam_handle_t, proc_bsdinfo},
+    err, errprint, errx,
+    timestamp::Time,
+    warn,
+};
+use libc::{c_char, c_int, clockid_t, gid_t, pid_t, uid_t};
 use std::{
     borrow::Cow,
     collections::HashMap,
     env,
     ffi::{CStr, CString, OsStr, OsString},
-    mem,
+    io, mem,
     os::unix::ffi::OsStrExt,
-};
-
-use crate::{
-    bindings::{self, pam_handle_t},
-    err, errprint, errx,
 };
 
 pub fn getuid() -> uid_t {
@@ -122,8 +123,113 @@ pub fn getpwuid(uid: uid_t) -> Result<Passwd, ()> {
 
 /// # Safety
 /// `user` should be valid ptr
-pub unsafe fn initgroups(user: *const c_char, basegroup: libc::c_int) -> Result<(), ()> {
+pub unsafe fn initgroups(user: *const c_char, basegroup: c_int) -> Result<(), ()> {
     unsafe { libc::initgroups(user, basegroup).map(|| errprint!("initgroups")) }
+}
+
+pub fn getpid() -> pid_t {
+    unsafe { libc::getpid() }
+}
+
+pub fn getppid() -> pid_t {
+    unsafe { libc::getppid() }
+}
+
+pub fn getsid(pid: pid_t) -> Result<pid_t, ()> {
+    let res = unsafe { libc::getsid(pid) };
+    if res == libc::ESRCH {
+        errx!("can not get sid");
+    }
+    Ok(res)
+}
+
+#[derive(Debug)]
+pub struct ProcessInfo {
+    pub ppid: pid_t,
+    pub sid: pid_t,
+    pub start_time: u64,
+    pub tty: u32,
+}
+
+pub fn get_proc_info() -> Result<ProcessInfo, ()> {
+    let ppid = getppid();
+    let sid = getsid(0)?;
+    let info = unsafe {
+        let mut info: proc_bsdinfo = mem::zeroed();
+        let res = bindings::proc_pidinfo(
+            ppid,
+            bindings::PROC_PIDTBSDINFO as i32,
+            0,
+            &raw mut info as _,
+            size_of_val(&info) as c_int,
+        );
+        if res == -1 {
+            err!("get proc info");
+        }
+        info
+    };
+    let start_time = info.pbi_start_tvsec;
+    let tty = info.e_tdev;
+    if start_time == 0 || tty == 0 {
+        errx!("get proc info");
+    }
+    Ok(ProcessInfo {
+        ppid,
+        sid,
+        tty,
+        start_time,
+    })
+}
+
+// pub fn get_boot_time() -> Result<Time, ()> {
+//     unsafe {
+//         let mut name = [libc::CTL_KERN, libc::KERN_BOOTTIME];
+//         let mut size = size_of::<timespec>();
+//         let mut boot_time: Time = mem::zeroed();
+//         libc::sysctl(
+//             name.as_mut_ptr(),
+//             name.len() as u32,
+//             &raw mut boot_time as _,
+//             &raw mut size,
+//             ptr::null_mut(),
+//             0,
+//         )
+//         .map_minus(|| warn!("sysctl get boot time"))?;
+//         Ok(boot_time)
+//     }
+// }
+
+/// # CLOCK_MONOTONIC_RAW
+/// clock that increments monotonically, tracking the time since an arbitrary point like
+/// CLOCK_MONOTONIC.  However, this clock is unaffected by frequency or time adjustments.  It
+/// should not be compared to other system time sources.
+///
+/// # CLOCK_REALTIME
+/// the system's real time (i.e. wall time) clock, expressed as the amount of time since the
+/// Epoch.  This is the same as the value returned by gettimeofday(2).
+pub fn clock_gettime(clock_id: clockid_t) -> Result<Time, ()> {
+    unsafe {
+        let mut time: Time = mem::zeroed();
+        bindings::clock_gettime(clock_id, &raw mut time as _)
+            .map_minus(|| warn!("clock_gettime"))?;
+        Ok(time)
+    }
+}
+
+pub fn fstat(fd: c_int) -> Result<bindings::stat, ()> {
+    unsafe {
+        let mut stat = mem::zeroed();
+        bindings::fstat(fd, &raw mut stat).map_minus(|| errprint!("fstat"))?;
+        Ok(stat)
+    }
+}
+
+pub fn fchown(fd: c_int, owner: uid_t, group: gid_t) -> Result<(), io::Error> {
+    unsafe { libc::fchown(fd, owner, group).mapx(|_| io::Error::last_os_error()) }
+}
+
+pub fn futimens(fd: c_int, times: &[Time; 2]) -> Result<(), ()> {
+    unsafe { bindings::futimens(fd, times.as_ptr() as _).map(|| errprint!("set futimens")) }
 }
 
 fn getpwnam(name: &CStr) -> Option<libc::passwd> {
@@ -150,7 +256,7 @@ pub fn pam_start(
     service: &CStr,
     user: &CStr,
     pam_conv: &bindings::pam_conv,
-    pamh: &mut *mut bindings::pam_handle_t,
+    pamh: &mut *mut pam_handle_t,
 ) -> Result<(), ()> {
     unsafe {
         bindings::pam_start(service.as_ptr(), user.as_ptr(), pam_conv, pamh).map(|| {
@@ -164,8 +270,8 @@ pub fn pam_start(
 }
 
 pub fn pam_set_item<'a>(
-    pamh: &'a mut bindings::pam_handle_t,
-    item_type: libc::c_int,
+    pamh: &'a mut pam_handle_t,
+    item_type: c_int,
     item: &CStr,
 ) -> Result<(), &'a CStr> {
     unsafe {
@@ -174,19 +280,19 @@ pub fn pam_set_item<'a>(
     }
 }
 
-pub fn pam_authenticate(pamh: &mut bindings::pam_handle_t, flags: c_int) -> Result<(), ()> {
+pub fn pam_authenticate(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), ()> {
     unsafe { bindings::pam_authenticate(pamh, flags).mapx(|_| ()) }
 }
 
-pub fn pam_acct_mgmt(pamh: &mut bindings::pam_handle_t, flags: c_int) -> Result<(), c_int> {
+pub fn pam_acct_mgmt(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), c_int> {
     unsafe { bindings::pam_acct_mgmt(pamh, flags).map_direct() }
 }
 
-pub fn pam_chauthtok(pamh: &mut bindings::pam_handle_t, flags: c_int) -> Result<(), c_int> {
+pub fn pam_chauthtok(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), c_int> {
     unsafe { bindings::pam_chauthtok(pamh, flags).map_direct() }
 }
 
-pub fn pam_close_session(pamh: &mut bindings::pam_handle_t, flags: c_int) -> Result<(), ()> {
+pub fn pam_close_session(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), ()> {
     unsafe {
         bindings::pam_close_session(pamh, flags)
             .mapx_pam(pamh, |str| errprint!("pam_close_session: {str}",))
@@ -197,10 +303,7 @@ pub fn pam_strerror(pamh: &pam_handle_t, error_number: c_int) -> &CStr {
     unsafe { CStr::from_ptr(bindings::pam_strerror(pamh, error_number)) }
 }
 
-pub fn pam_setcred(
-    pamh: &mut bindings::pam_handle_t,
-    flags: libc::c_int,
-) -> Result<(), (c_int, &CStr)> {
+pub fn pam_setcred(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), (c_int, &CStr)> {
     let ret = unsafe { bindings::pam_setcred(pamh, flags) };
     ret.map_to_pam_str(pamh).map_err(|e| (ret, e))
 }
@@ -274,7 +377,7 @@ pub fn parse_gid(gid: &str) -> Result<gid_t, ()> {
     Ok(gid)
 }
 
-fn perror(str: &CStr) {
+pub fn perror(str: &CStr) {
     unsafe {
         libc::perror(str.as_ptr());
     }
@@ -284,10 +387,13 @@ trait MapErrNo {
     fn map<F>(self, f: F) -> Result<(), ()>
     where
         F: FnOnce();
-    fn mapx<F>(self, f: F) -> Result<(), ()>
+    fn map_minus<F>(self, f: F) -> Result<(), ()>
     where
-        F: FnOnce(libc::c_int);
-    fn mapx_pam<'a, F>(self, pamh: &bindings::pam_handle_t, f: F) -> Result<(), ()>
+        F: FnOnce();
+    fn mapx<F, T>(self, f: F) -> Result<(), T>
+    where
+        F: FnOnce(c_int) -> T;
+    fn mapx_pam<'a, F>(self, pamh: &pam_handle_t, f: F) -> Result<(), ()>
     where
         F: FnOnce(Cow<'a, str>);
     fn map_to_pam_str(self, pamh: &pam_handle_t) -> Result<(), &CStr>;
@@ -296,7 +402,8 @@ trait MapErrNo {
         Self: Sized;
 }
 
-impl MapErrNo for libc::c_int {
+impl MapErrNo for c_int {
+    // 0 means success
     fn map<F>(self, f: F) -> Result<(), ()>
     where
         F: FnOnce(),
@@ -309,21 +416,29 @@ impl MapErrNo for libc::c_int {
             Err(())
         }
     }
-    fn mapx<F>(self, f: F) -> Result<(), ()>
+    // -1 means failure
+    fn map_minus<F>(self, f: F) -> Result<(), ()>
     where
-        F: FnOnce(libc::c_int),
+        F: FnOnce(),
     {
-        if self == 0 {
-            Ok(())
-        } else {
-            f(self);
+        if self == -1 {
+            f();
+            perror(c"");
             Err(())
+        } else {
+            Ok(())
         }
+    }
+    fn mapx<F, T>(self, f: F) -> Result<(), T>
+    where
+        F: FnOnce(c_int) -> T,
+    {
+        if self == 0 { Ok(()) } else { Err(f(self)) }
     }
     fn map_direct(self) -> Result<(), Self> {
         if self == 0 { Ok(()) } else { Err(self) }
     }
-    fn mapx_pam<'a, F>(self, pamh: &bindings::pam_handle_t, f: F) -> Result<(), ()>
+    fn mapx_pam<'a, F>(self, pamh: &pam_handle_t, f: F) -> Result<(), ()>
     where
         F: FnOnce(Cow<'a, str>),
     {
