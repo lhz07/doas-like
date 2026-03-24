@@ -3,7 +3,7 @@
 #[global_allocator]
 static GLOBAL: System = System;
 
-use std::{alloc::System, ffi::CStr, time::Duration};
+use std::{alloc::System, ffi::CStr};
 
 pub mod bindings;
 pub mod c;
@@ -17,7 +17,6 @@ pub mod verify;
 pub const CNAME: &CStr = c"doas";
 pub const NAME: &str = "doas";
 pub const CONF_PATH: &str = "/etc/doas.conf";
-pub static TIMEOUT: Duration = Duration::from_mins(5);
 
 #[macro_export]
 macro_rules! errx {

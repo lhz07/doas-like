@@ -49,6 +49,30 @@ impl ops::Deref for Time {
     }
 }
 
+pub trait FromStr<T, E> {
+    fn from_str(str: &str) -> Result<T, E>;
+}
+
+impl FromStr<Duration, &str> for Duration {
+    fn from_str(str: &str) -> Result<Duration, &'static str> {
+        if str.len() < 2 {
+            return Err("invalid duration");
+        }
+        match str.split_at_checked(str.len() - 1) {
+            Some((num, unit)) => {
+                let num = num.parse().map_err(|_| "invalid duration number")?;
+                let dur = match unit {
+                    "m" => Duration::from_mins(num),
+                    "s" => Duration::from_secs(num),
+                    _ => return Err("invalid duration unit"),
+                };
+                Ok(dur)
+            }
+            None => Err("invalid duration"),
+        }
+    }
+}
+
 impl Time {
     pub fn new(timespec: timespec) -> Self {
         Self(timespec)
@@ -97,18 +121,9 @@ impl cmp::PartialOrd for Time {
 
 impl cmp::Ord for Time {
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        if self.tv_sec > other.tv_sec {
-            cmp::Ordering::Greater
-        } else if self.tv_sec == other.tv_sec {
-            if self.tv_nsec > other.tv_nsec {
-                cmp::Ordering::Greater
-            } else if self.tv_nsec < other.tv_nsec {
-                cmp::Ordering::Less
-            } else {
-                cmp::Ordering::Equal
-            }
-        } else {
-            cmp::Ordering::Less
+        match self.tv_sec.cmp(&other.tv_sec) {
+            cmp::Ordering::Equal => self.tv_nsec.cmp(&other.tv_nsec),
+            ord => ord,
         }
     }
 }

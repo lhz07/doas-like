@@ -1,6 +1,7 @@
 use libc::{gid_t, uid_t};
 use std::{
     borrow::Cow,
+    collections::HashSet,
     ffi::{OsStr, OsString},
     fmt, fs,
     io::{self, Read},
@@ -10,9 +11,11 @@ use std::{
         fs::{MetadataExt, PermissionsExt},
     },
     str::Chars,
+    sync::LazyLock,
+    time::Duration,
 };
 
-use crate::{c, errx};
+use crate::{c, errx, timestamp::FromStr};
 
 #[derive(Debug)]
 pub enum ConfigError<'a> {
@@ -56,8 +59,9 @@ pub enum Val {
 #[derive(Debug, Default)]
 pub struct Options {
     pub nopass: bool,
+    pub insult: bool,
     pub nolog: bool,
-    pub persist: bool,
+    pub persist: Option<Duration>,
     pub keepenv: bool,
     pub envs: Vec<Env>,
 }
@@ -252,6 +256,13 @@ impl<'a> Tokenizer<'a> {
     }
 }
 
+static OPTIONS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    ["nopass", "nolog", "persist", "keepenv", "insult", "setenv"]
+        .into_iter()
+        .collect()
+});
+static DEFAULT_TIMEOUT: Duration = Duration::from_mins(5);
+
 fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
     // let mut tokens = tokens.into_iter().peekable();
 
@@ -264,10 +275,17 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
 
     // optional options
     let mut options = Options::default();
+    let mut available_options = OPTIONS.clone();
     'outer: loop {
         match tokens.peek() {
             Some(token) => match token.as_str() {
                 "nopass" => {
+                    if !available_options.remove("nopass") {
+                        return Err(ConfigError::Syntax(
+                            "duplicate \"nopass\"".into(),
+                            tokens.line(),
+                        ));
+                    }
                     options.nopass = true;
                     tokens.next();
                 }
@@ -276,11 +294,47 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
                     tokens.next();
                 }
                 "persist" => {
-                    options.persist = true;
+                    if !available_options.remove("persist") {
+                        return Err(ConfigError::Syntax(
+                            "duplicate \"persist\"".into(),
+                            tokens.line(),
+                        ));
+                    }
                     tokens.next();
+                    if let Some(s) = tokens.peek()
+                        && s == "{"
+                    {
+                        tokens.next();
+                        let Some(duration) = tokens.next() else {
+                            return Err(ConfigError::Syntax(
+                                "missing duration after \"persist { \"".into(),
+                                tokens.line(),
+                            ));
+                        };
+                        match Duration::from_str(&duration) {
+                            Ok(dur) => options.persist = Some(dur),
+                            Err(e) => {
+                                return Err(ConfigError::Syntax(e.into(), tokens.line()));
+                            }
+                        }
+                        if let Some(s) = tokens.next()
+                            && s != "}"
+                        {
+                            return Err(ConfigError::Syntax(
+                                "missing \"}\" after duration".into(),
+                                tokens.line(),
+                            ));
+                        }
+                    } else {
+                        options.persist = Some(DEFAULT_TIMEOUT);
+                    }
                 }
                 "keepenv" => {
                     options.keepenv = true;
+                    tokens.next();
+                }
+                "insult" => {
+                    options.insult = true;
                     tokens.next();
                 }
                 "setenv" => {
@@ -465,9 +519,9 @@ fn test_parse() {
         if !file.file_name().to_string_lossy().starts_with("test") {
             continue;
         }
-        match Config::parse("tests/test1.conf", false) {
+        match Config::parse(file.path().to_string_lossy().as_ref(), false) {
             Ok(rules) => println!("{:#?}", rules),
-            Err(e) => panic!("{e}"),
+            Err(e) => panic!("file name: {}, error: {e}", file.file_name().display()),
         }
     }
 }

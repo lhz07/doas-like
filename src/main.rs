@@ -1,6 +1,6 @@
 use clap::Parser;
 use doas::{
-    CNAME, CONF_PATH, TIMEOUT,
+    CNAME, CONF_PATH,
     c::{self},
     command::CliArgs,
     config::{Config, check_config, permit},
@@ -73,11 +73,11 @@ fn inner_main() -> Result<(), ()> {
     let target_user = unsafe { CStr::from_ptr(target_pw.pw_name) };
     let mut persist_file = None;
     let persist_pass = {
-        if rule.options.persist
-            && let Ok(file) = timestamp::open(TIMEOUT)
+        if let Some(dur) = rule.options.persist
+            && let Ok(file) = timestamp::open(dur)
         {
             let file = persist_file.insert(file);
-            timestamp::check(file, TIMEOUT).is_ok_and(|b| b)
+            timestamp::check(file, dur).is_ok_and(|b| b)
         } else {
             false
         }
@@ -89,12 +89,14 @@ fn inner_main() -> Result<(), ()> {
         // downgrade to real uid
         c::seteuid(real_uid)?;
         // authenticate user
-        verify::auth(target_user, myname)?;
+        verify::auth(target_user, myname, rule.options.insult)?;
         // upgrade to euid
         c::setreuid(0, 0)?;
     }
-    if let Some(file) = persist_file {
-        let _ = timestamp::set(&file, TIMEOUT);
+    if let Some(file) = persist_file
+        && let Some(dur) = rule.options.persist
+    {
+        let _ = timestamp::set(&file, dur);
     }
 
     c::setregid(target_pw.pw_gid, target_pw.pw_gid)?;

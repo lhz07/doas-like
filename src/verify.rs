@@ -5,7 +5,7 @@ use std::{ffi::CStr, rc::Rc, sync::atomic::AtomicBool, thread};
 
 use crate::{errx, insults, pam};
 
-pub fn auth(target_user: &CStr, myname: &CStr) -> Result<(), ()> {
+pub fn auth(target_user: &CStr, myname: &CStr, insult: bool) -> Result<(), ()> {
     if auth_by_local_authentication() {
         return Ok(());
     }
@@ -15,7 +15,11 @@ pub fn auth(target_user: &CStr, myname: &CStr) -> Result<(), ()> {
         if res.is_ok() {
             return res;
         }
-        eprintln!("{}", insults::get_an_insult());
+        if insult {
+            eprintln!("{}", insults::get_an_insult());
+        } else {
+            eprintln!("Sorry, please try again");
+        }
     }
     errx!("Authentication failed");
 }
