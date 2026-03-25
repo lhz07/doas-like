@@ -1,5 +1,6 @@
 use crate::{
     bindings::{self, pam_handle_t, proc_bsdinfo},
+    config::{Env, Val},
     err, errprint, errx,
     timestamp::Time,
     warn,
@@ -326,14 +327,55 @@ fn create_env(mypw: &libc::passwd, target_pw: &libc::passwd) -> HashMap<OsString
         envs.insert("SHELL".into(), c_to_os(target_pw.pw_shell));
         envs.insert("USER".into(), c_to_os(target_pw.pw_name));
     }
-
     fill_env_inherit(&copyset, &mut envs);
 
     envs
 }
 
-pub fn prep_env(mypw: &libc::passwd, target_pw: &libc::passwd) -> HashMap<OsString, OsString> {
-    create_env(mypw, target_pw)
+pub fn prep_env(
+    mypw: &libc::passwd,
+    target_pw: &libc::passwd,
+    keepenv: bool,
+    setenvs: Vec<Env>,
+) -> HashMap<OsString, OsString> {
+    let mut envs = create_env(mypw, target_pw);
+    if keepenv {
+        keep_envs(&mut envs);
+    }
+    apply_rule_envs(setenvs, &mut envs);
+    envs
+}
+
+fn keep_envs(envs: &mut HashMap<OsString, OsString>) {
+    for (key, val) in env::vars_os() {
+        // ignore duplicate envs
+        envs.entry(key).or_insert(val);
+    }
+}
+
+fn apply_rule_envs(setenvs: Vec<Env>, envs: &mut HashMap<OsString, OsString>) {
+    for env in setenvs {
+        match env {
+            Env::Keep(key) => {
+                if let Some(val) = env::var_os(&key) {
+                    envs.insert(key.into(), val);
+                }
+            }
+            Env::Set { key, val } => match val {
+                Val::New(val) => {
+                    envs.insert(key.into(), val.into());
+                }
+                Val::FromEnv(val_key) => {
+                    if let Some(val) = env::var_os(&val_key) {
+                        envs.insert(key.into(), val);
+                    }
+                }
+            },
+            Env::Remove(key) => {
+                envs.remove::<OsStr>(key.as_ref());
+            }
+        }
+    }
 }
 
 fn fill_env_inherit<S>(copy_from: &[S], envs: &mut HashMap<OsString, OsString>)

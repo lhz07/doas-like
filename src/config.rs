@@ -629,14 +629,14 @@ impl Config {
     }
 }
 #[must_use = "you should always check this"]
-pub fn permit<'a>(
-    rules: &'a [Config],
+pub fn permit(
+    rules: Vec<Config>,
     uid: uid_t,
     groups: &[gid_t],
     target: uid_t,
     cmd: &OsStr,
     cmd_args: &[OsString],
-) -> Option<&'a Config> {
+) -> Option<Config> {
     let mut last_rule = None;
     for rule in rules {
         if rule.match_rule(uid, groups, target, cmd, cmd_args).is_ok() {
@@ -668,7 +668,7 @@ pub fn check_config(
         println!("the configuration file {path} syntax is ok");
         return Ok(());
     }
-    if let Some(r) = permit(&rules, uid, groups, target, &cmds[0], &cmds[1..]) {
+    if let Some(r) = permit(rules, uid, groups, target, &cmds[0], &cmds[1..]) {
         println!("permit{}", if r.options.nopass { " nopass" } else { "" });
         Ok(())
     } else {

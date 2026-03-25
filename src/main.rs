@@ -64,7 +64,7 @@ fn inner_main() -> Result<(), ()> {
         Err(e) => errx!("config error: {e}"),
     };
 
-    let Some(rule) = permit(&config, real_uid, &groups, target_uid, cmd, cmd_args) else {
+    let Some(rule) = permit(config, real_uid, &groups, target_uid, cmd, cmd_args) else {
         let err = std::io::Error::from_raw_os_error(libc::EPERM);
         errx!("{err}");
     };
@@ -102,7 +102,7 @@ fn inner_main() -> Result<(), ()> {
     c::setregid(target_pw.pw_gid, target_pw.pw_gid)?;
     unsafe { c::initgroups(target_pw.pw_name, target_pw.pw_gid as i32)? };
     c::setreuid(target_uid, target_uid)?;
-    let envs = c::prep_env(&mypw, &target_pw);
+    let envs = c::prep_env(&mypw, &target_pw, rule.options.keepenv, rule.options.envs);
     let err = process::Command::new(cmd)
         .args(cmd_args)
         .env_clear()
