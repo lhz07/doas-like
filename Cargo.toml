@@ -4,13 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-block2 = { version = "0.6.2", default-features = false, features = ["alloc"] }
-clap = { version = "4.6.0", features = ["derive"] }
 libc = "0.2.183"
+# apple local authentication
+block2 = { version = "0.6.2", default-features = false, features = ["alloc"] }
 objc2 = { version = "0.6.4", default-features = false }
 objc2-foundation = { version = "0.3.2", default-features = false }
 objc2-local-authentication = { version = "0.3.2", default-features = false, features = ["LAContext", "block2"] }
+# cli command parse
+clap = { version = "4.6.0", features = ["derive"] }
+# choose a random insult
 rand = "0.10.0"
+# clear password in memory
 zeroize = { version = "1.8.2", features = ["std"] }
 
 [profile.release]

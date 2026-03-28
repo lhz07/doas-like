@@ -86,12 +86,8 @@ fn inner_main() -> Result<(), ()> {
         if args.non_interactive {
             errx!("Authentication required");
         }
-        // downgrade to real uid
-        c::seteuid(real_uid)?;
         // authenticate user
-        verify::auth(target_user, myname, rule.options.insult)?;
-        // upgrade to euid
-        c::setreuid(0, 0)?;
+        verify::auth(target_user, myname, rule.options.insult, real_uid)?;
     }
     if let Some(file) = persist_file
         && let Some(dur) = rule.options.persist
