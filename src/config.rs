@@ -5,17 +5,19 @@ use std::{
     ffi::{OsStr, OsString},
     fmt, fs,
     io::{self, Read},
-    iter::Peekable,
     os::unix::{
         ffi::OsStrExt,
         fs::{MetadataExt, PermissionsExt},
     },
-    str::Chars,
     sync::LazyLock,
     time::Duration,
 };
 
-use crate::{c, errx, timestamp::FromStr};
+use crate::{
+    c, errx,
+    timestamp::FromStr,
+    tokenizer::{State, Tokenizer, gen_tokenizer},
+};
 
 #[derive(Debug)]
 pub enum ConfigError<'a> {
@@ -29,7 +31,7 @@ impl<'a> fmt::Display for ConfigError<'a> {
         match self {
             Self::IO(e, path) => writeln!(f, "{e}, file path: {path}")?,
             Self::Permission(e, path) => writeln!(f, "permission: {e}, file path: {path}")?,
-            Self::Syntax(e, line) => writeln!(f, "syntax: {e} at line: {line}")?,
+            Self::Syntax(e, line) => writeln!(f, "syntax: line {line}: {e}")?,
         }
         Ok(())
     }
@@ -88,174 +90,6 @@ pub struct Config {
     cmd: Option<Cmd>,
 }
 
-struct Tokenizer<'a> {
-    chars: Peekable<Chars<'a>>,
-    line: usize,
-    str: String,
-    skipping_comment: bool,
-    return_later: bool,
-    finished: bool,
-    escaped: bool,
-    quoted: bool,
-    is_peeked: bool,
-    first: bool,
-    peeked: Option<String>,
-}
-
-impl<'a> Tokenizer<'a> {
-    fn new(chars: Peekable<Chars<'a>>) -> Self {
-        Self {
-            chars,
-            line: 1,
-            str: String::new(),
-            skipping_comment: false,
-            return_later: false,
-            finished: false,
-            escaped: false,
-            quoted: false,
-            is_peeked: false,
-            first: true,
-            peeked: None,
-        }
-    }
-
-    fn line(&self) -> usize {
-        self.line
-    }
-
-    fn next_line(&mut self) -> bool {
-        if self.finished {
-            return false;
-        }
-        if self.is_peeked && self.peeked.is_none() {
-            // reset peek status
-            println!("reset peek status");
-            self.is_peeked = false;
-        }
-        if self.chars.peek().is_none() {
-            self.finished = true;
-        }
-        !self.finished
-    }
-
-    fn peek(&mut self) -> Option<&String> {
-        if self.is_peeked {
-            return self.peeked.as_ref();
-        }
-        match self.next() {
-            Some(s) => {
-                self.is_peeked = true;
-                Some(self.peeked.insert(s))
-            }
-            None => {
-                self.is_peeked = true;
-                None
-            }
-        }
-    }
-
-    fn collect(&mut self) -> Vec<String> {
-        let mut list = Vec::new();
-        while let Some(s) = self.next() {
-            list.push(s);
-        }
-        list
-    }
-
-    fn next(&mut self) -> Option<String> {
-        if self.is_peeked {
-            self.is_peeked = false;
-            return std::mem::take(&mut self.peeked);
-        }
-        if self.finished {
-            return None;
-        }
-        for ch in self.chars.by_ref() {
-            if self.skipping_comment {
-                if ch != '\n' {
-                    continue;
-                } else {
-                    self.skipping_comment = false;
-                    self.line += 1;
-                    if !self.str.is_empty() {
-                        self.return_later = true;
-                        if self.first {
-                            self.first = false;
-                        }
-                        return Some(std::mem::take(&mut self.str));
-                    } else {
-                        if !self.first {
-                            self.return_later = true;
-                        }
-                        continue;
-                    }
-                }
-            }
-            if self.escaped {
-                match ch {
-                    '\n' => self.line += 1,
-                    _ => self.str.push(ch),
-                }
-                self.escaped = false;
-                continue;
-            }
-            if self.quoted && ch != '"' {
-                self.str.push(ch);
-                continue;
-            }
-            match ch {
-                ' ' | '\t' => {
-                    if !self.str.is_empty() {
-                        if self.first {
-                            self.first = false;
-                        }
-                        return Some(std::mem::take(&mut self.str));
-                    }
-                    continue;
-                }
-                '\n' => {
-                    self.line += 1;
-                    if !self.str.is_empty() {
-                        self.return_later = true;
-                        if self.first {
-                            self.first = false;
-                        }
-                        return Some(std::mem::take(&mut self.str));
-                    } else {
-                        if !self.first {
-                            self.return_later = true;
-                        }
-                        continue;
-                    }
-                }
-                // skip comment
-                '#' => {
-                    self.skipping_comment = true;
-                    continue;
-                }
-                '\\' => {
-                    self.escaped = !self.escaped;
-                    continue;
-                }
-                '"' => {
-                    self.quoted = !self.quoted;
-                    continue;
-                }
-                _ => {
-                    self.str.push(ch);
-                    if self.return_later {
-                        self.return_later = false;
-                        return None;
-                    }
-                    continue;
-                }
-            }
-        }
-        self.finished = true;
-        None
-    }
-}
-
 static OPTIONS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
     ["nopass", "nolog", "persist", "keepenv", "insult", "setenv"]
         .into_iter()
@@ -263,13 +97,16 @@ static OPTIONS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
 });
 static DEFAULT_TIMEOUT: Duration = Duration::from_mins(5);
 
-fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
+fn parser<'a, T>(tokens: &mut Tokenizer<T>) -> Result<Config, ConfigError<'a>>
+where
+    T: Iterator<Item = State>,
+{
     // let mut tokens = tokens.into_iter().peekable();
 
     // there must be an action
     let action = match tokens.next() {
-        Some(s) if s == "permit" => Action::Permit,
-        Some(s) if s == "deny" => Action::Deny,
+        Some(s) if s.is_key("permit") => Action::Permit,
+        Some(s) if s.is_key("deny") => Action::Deny,
         _ => return Err(ConfigError::Syntax("missing action".into(), tokens.line())),
     };
 
@@ -278,7 +115,7 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
     let mut available_options = OPTIONS.clone();
     'outer: loop {
         match tokens.peek() {
-            Some(token) => match token.as_str() {
+            Some(token) if !token.quoted() => match token.as_str() {
                 "nopass" => {
                     if !available_options.remove("nopass") {
                         return Err(ConfigError::Syntax(
@@ -302,7 +139,7 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
                     }
                     tokens.next();
                     if let Some(s) = tokens.peek()
-                        && s == "{"
+                        && s.is_key("{")
                     {
                         tokens.next();
                         let Some(duration) = tokens.next() else {
@@ -311,14 +148,14 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
                                 tokens.line(),
                             ));
                         };
-                        match Duration::from_str(&duration) {
+                        match Duration::from_str(duration.as_str()) {
                             Ok(dur) => options.persist = Some(dur),
                             Err(e) => {
                                 return Err(ConfigError::Syntax(e.into(), tokens.line()));
                             }
                         }
                         if let Some(s) = tokens.next()
-                            && s != "}"
+                            && !s.is_key("}")
                         {
                             return Err(ConfigError::Syntax(
                                 "missing \"}\" after duration".into(),
@@ -339,14 +176,14 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
                 }
                 "setenv" => {
                     tokens.next();
-                    if tokens.next().is_none_or(|s| s != "{") {
+                    if tokens.next().is_none_or(|s| !s.is_key("{")) {
                         return Err(ConfigError::Syntax(
                             "missing envs after \"setenv\"".into(),
                             tokens.line(),
                         ));
                     }
                     while let Some(token) = tokens.next() {
-                        if token == "}" {
+                        if token.is_key("}") {
                             if options.envs.is_empty() {
                                 return Err(ConfigError::Syntax(
                                     "missing envs inside \"{}\"".into(),
@@ -354,50 +191,80 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
                                 ));
                             }
                             continue 'outer;
-                        } else if let Some((nothing, env)) = token.split_once("-")
+                        } else if !token.quoted()
+                            && let Some((nothing, env)) = token.as_str().split_once("-")
                             && nothing.is_empty()
                         {
+                            // the environment variable only allows letters, numbers and "_"
+                            // Examples:
+                            // -PKG
+                            // -PKG_CACHE
+                            // -PKG_CACHE_2
                             if env.is_empty() {
                                 return Err(ConfigError::Syntax(
-                                    format!("invalid env: {token}, missing an env after \"-\"")
-                                        .into(),
+                                    format!(
+                                        "invalid env: {}, missing an env after \"-\"",
+                                        token.as_str()
+                                    )
+                                    .into(),
                                     tokens.line(),
                                 ));
                             }
                             options.envs.push(Env::Remove(env.to_string()));
-                        } else if let Some((key, val)) = token.split_once("=") {
+                        }
+                        // PKG="/path/to"
+                        // PKG=/path"/to"
+                        // PKG="/path"/to
+                        // PKG=/path/to
+                        // PKG="jUh38aS$"
+                        // PKG=jUh38"aS$"
+                        // PKG=$PHG_CACHE
+                        else if let Some((key, val_unquote)) =
+                            token.before_quoted().split_once("=")
+                        {
                             if key.is_empty() {
                                 return Err(ConfigError::Syntax(
-                                    format!("invalid env: {token}, missing a key before \"=\"")
-                                        .into(),
+                                    format!(
+                                        "invalid env: {}, missing a key before \"=\"",
+                                        token.as_str()
+                                    )
+                                    .into(),
                                     tokens.line(),
                                 ));
                             }
+                            let (key, val) = token
+                                .as_str()
+                                .split_once("=")
+                                .expect("we have checked before");
+
                             if val.is_empty() {
                                 return Err(ConfigError::Syntax(
-                                    format!("invalid env: {token}, missing a value after \"=\"")
-                                        .into(),
+                                    format!(
+                                        "invalid env: {}, missing a value after \"=\"",
+                                        token.as_str()
+                                    )
+                                    .into(),
                                     tokens.line(),
                                 ));
                             }
-                            let val = match val.split_once("$") {
-                                Some((nothing, value)) => {
-                                    if !nothing.is_empty() || value.is_empty() {
-                                        return Err(ConfigError::Syntax(
-                                            format!("invalid env value: {}", val).into(),
-                                            tokens.line(),
-                                        ));
-                                    }
-                                    Val::FromEnv(value.to_string())
+                            let val = match val_unquote.split_once("$") {
+                                Some(("", "")) => {
+                                    return Err(ConfigError::Syntax(
+                                        "missing env name after \"$\"".into(),
+                                        tokens.line(),
+                                    ));
                                 }
-                                None => Val::New(val.to_string()),
+                                Some(("", value)) => Val::FromEnv(value.to_string()),
+                                _ => Val::New(val.to_string()),
                             };
                             options.envs.push(Env::Set {
                                 key: key.to_string(),
                                 val,
                             });
+                        } else if !token.quoted() {
+                            options.envs.push(Env::Keep(token.into_string()));
                         } else {
-                            options.envs.push(Env::Keep(token));
+                            eprintln!("warning: quoted env: \"{}\" is ignored", token.as_str())
                         }
                     }
                     return Err(ConfigError::Syntax(
@@ -410,6 +277,10 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
                     break;
                 }
             },
+            Some(_) => {
+                // no options, we should parse user
+                break;
+            }
             None => {
                 return Err(ConfigError::Syntax(
                     "missing identity".into(),
@@ -420,11 +291,14 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
     }
 
     // there must be an identity
-    let Some(identity) = tokens.next() else {
-        return Err(ConfigError::Syntax(
-            "missing identity".into(),
-            tokens.line(),
-        ));
+    let identity = match tokens.next() {
+        Some(i) => i.into_string(),
+        _ => {
+            return Err(ConfigError::Syntax(
+                "missing identity".into(),
+                tokens.line(),
+            ));
+        }
     };
     let identity = match identity.split_once(":") {
         Some((user, group)) => {
@@ -449,12 +323,12 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
 
     // optional target
     let target = if let Some(token) = tokens.peek()
-        && token == "as"
+        && token.is_key("as")
     {
         tokens.next();
         // parse target
         match tokens.next() {
-            Some(target) => Some(target),
+            Some(target) => Some(target.into_string()),
             None => {
                 return Err(ConfigError::Syntax(
                     "missing target after \"as\"".into(),
@@ -468,23 +342,26 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
 
     // optional cmd
     let cmd = if let Some(token) = tokens.next() {
-        if token != "cmd" {
+        if !token.is_key("cmd") {
             return Err(ConfigError::Syntax(
                 "expected \"cmd\" before command".into(),
                 tokens.line(),
             ));
         }
-        let Some(cmd) = tokens.next() else {
-            return Err(ConfigError::Syntax(
-                "missing command after \"cmd\"".into(),
-                tokens.line(),
-            ));
+        let cmd = match tokens.next() {
+            Some(s) => s.into_string(),
+            None => {
+                return Err(ConfigError::Syntax(
+                    "missing command after \"cmd\"".into(),
+                    tokens.line(),
+                ));
+            }
         };
         // optional args
         let cmd_args = match tokens.next() {
             Some(arg) => {
-                if arg == "args" {
-                    let args = tokens.collect();
+                if arg.is_key("args") {
+                    let args = tokens.by_ref().map(|t| t.into_string()).collect();
                     Some(args)
                 } else {
                     return Err(ConfigError::Syntax(
@@ -513,6 +390,11 @@ fn parser<'a>(tokens: &mut Tokenizer<'_>) -> Result<Config, ConfigError<'a>> {
 
 #[test]
 fn test_parse() {
+    #[cfg(feature = "nightly")]
+    println!("with nightly feature");
+    #[cfg(not(feature = "nightly"))]
+    println!("without nightly feature");
+
     let files = fs::read_dir("tests").unwrap();
     for file in files {
         let file = file.unwrap();
@@ -520,7 +402,11 @@ fn test_parse() {
             continue;
         }
         match Config::parse(file.path().to_string_lossy().as_ref(), false) {
-            Ok(rules) => println!("{:#?}", rules),
+            Ok(rules) => println!(
+                "file name: {}, rules: {:?}\n",
+                file.file_name().display(),
+                rules
+            ),
             Err(e) => panic!("file name: {}, error: {e}", file.file_name().display()),
         }
     }
@@ -558,7 +444,7 @@ impl Config {
         file.read_to_string(&mut content)
             .map_err(|e| ConfigError::IO(e, path))?;
         let mut rules = Vec::new();
-        let mut tokenizer = Tokenizer::new(content.chars().peekable());
+        let mut tokenizer = gen_tokenizer(&content);
         while tokenizer.next_line() {
             let rule = parser(&mut tokenizer)?;
             rules.push(rule);
@@ -628,6 +514,7 @@ impl Config {
         Ok(())
     }
 }
+
 #[must_use = "you should always check this"]
 pub fn permit(
     rules: Vec<Config>,
@@ -665,7 +552,7 @@ pub fn check_config(
         Err(e) => errx!("config error: {e}"),
     };
     if cmds.is_empty() {
-        println!("the configuration file {path} syntax is ok");
+        println!("the configuration file syntax is ok");
         return Ok(());
     }
     if let Some(r) = permit(rules, uid, groups, target, &cmds[0], &cmds[1..]) {

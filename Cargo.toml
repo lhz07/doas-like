@@ -23,3 +23,6 @@ panic = "abort"
 
 [build-dependencies]
 bindgen = "0.71.0"
+
+[features]
+nightly = []

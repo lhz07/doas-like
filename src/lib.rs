@@ -1,4 +1,5 @@
 #![allow(clippy::result_unit_err)]
+#![cfg_attr(feature = "nightly", feature(gen_blocks))]
 
 #[global_allocator]
 static GLOBAL: System = System;
@@ -12,6 +13,7 @@ pub mod config;
 pub mod insults;
 pub mod pam;
 pub mod timestamp;
+pub mod tokenizer;
 pub mod verify;
 
 pub const CNAME: &CStr = c"doas";
