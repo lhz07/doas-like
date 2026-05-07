@@ -64,14 +64,6 @@ gen fn tokenizer(content: &str) -> State {
             }
             // skip comment
             '#' => {
-                if !token.str.is_empty() {
-                    token_empty = false;
-                    yield State::Token(token.finish(quote_state.take_option()), line_count);
-                }
-                if !token_empty {
-                    token_empty = true;
-                    yield State::NewLine(line_count);
-                }
                 skipping_comment = true;
             }
             '\\' => {
@@ -93,6 +85,13 @@ gen fn tokenizer(content: &str) -> State {
                 token.str.push(ch);
             }
         }
+    }
+    if !token.str.is_empty() {
+        token_empty = false;
+        yield State::Token(token.finish(quote_state.take_option()), line_count);
+    }
+    if !token_empty {
+        yield State::NewLine(line_count);
     }
 }
 

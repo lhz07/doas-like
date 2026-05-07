@@ -30,9 +30,7 @@ impl Iterator for TokenizerInner<'_> {
 
 enum Location {
     TokenEmptyLineCount,
-    TokenEmptySkipComment,
     LineCount,
-    SkipComment,
     ReturnBrace(u8),
 }
 
@@ -57,18 +55,10 @@ impl<'a> TokenizerInner<'a> {
                     if !self.token_empty {
                         self.token_empty = true;
                         self.location = Some(Location::LineCount);
-                        return None;
-                    }
-                }
-                Location::TokenEmptySkipComment => {
-                    if !self.token_empty {
-                        self.token_empty = true;
-                        self.location = Some(Location::SkipComment);
-                        return None;
+                        return Some(State::NewLine(self.line_count));
                     }
                 }
                 Location::LineCount => self.line_count += 1,
-                Location::SkipComment => self.skipping_comment = true,
                 Location::ReturnBrace(ch) => {
                     self.token.str.push(ch as char);
                     return Some(State::Token(
@@ -124,7 +114,6 @@ impl<'a> TokenizerInner<'a> {
                 _ if ch.is_ascii_whitespace() => {
                     if !self.token.str.is_empty() {
                         self.token_empty = false;
-                        self.location = None;
                         return Some(State::Token(
                             self.token.finish(self.quote_state.take_option()),
                             self.line_count,
@@ -149,19 +138,6 @@ impl<'a> TokenizerInner<'a> {
                 }
                 // skip comment
                 '#' => {
-                    if !self.token.str.is_empty() {
-                        self.token_empty = false;
-                        self.location = Some(Location::TokenEmptySkipComment);
-                        return Some(State::Token(
-                            self.token.finish(self.quote_state.take_option()),
-                            self.line_count,
-                        ));
-                    }
-                    if !self.token_empty {
-                        self.token_empty = true;
-                        self.location = Some(Location::SkipComment);
-                        return Some(State::NewLine(self.line_count));
-                    }
                     self.skipping_comment = true;
                 }
                 '\\' => {
@@ -188,6 +164,27 @@ impl<'a> TokenizerInner<'a> {
                 }
             }
         }
+        if !self.token.str.is_empty() {
+            self.token_empty = false;
+            self.location = Some(Location::TokenEmptyLineCount);
+            return Some(State::Token(
+                self.token.finish(self.quote_state.take_option()),
+                self.line_count,
+            ));
+        }
+        if !self.token_empty {
+            self.token_empty = true;
+            return Some(State::NewLine(self.line_count));
+        }
         None
+    }
+}
+
+#[test]
+fn test_tokenizer() {
+    let content = std::fs::read_to_string("tests/test0.conf").unwrap();
+    let iter = TokenizerInner::new(&content);
+    for token in iter {
+        println!("{:?}", token);
     }
 }
