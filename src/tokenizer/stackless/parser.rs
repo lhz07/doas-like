@@ -1,6 +1,7 @@
-use crate::tokenizer::{QuoteState, State, Token, Tokenizer};
+use crate::tokenizer::stackless::Val;
+use crate::tokenizer::{QuoteState, State, Token};
 
-gen fn tokenizer(content: &str) -> State {
+pub async fn tokenizer(co: &Val<State>, content: &str) {
     let mut token = Token::default();
     let mut quote_state = QuoteState::default();
     let mut skipping_comment = false;
@@ -38,28 +39,44 @@ gen fn tokenizer(content: &str) -> State {
             '\n' => {
                 if !token.str.is_empty() {
                     token_empty = false;
-                    yield State::Token(token.finish(quote_state.take_option()), line_count);
+                    co.yield_(State::Token(
+                        token.finish(quote_state.take_option()),
+                        line_count,
+                    ))
+                    .await;
                 }
                 if !token_empty {
                     token_empty = true;
-                    yield State::NewLine(line_count);
+                    co.yield_(State::NewLine(line_count)).await;
                 }
                 line_count += 1;
             }
             _ if ch.is_ascii_whitespace() => {
                 if !token.str.is_empty() {
                     token_empty = false;
-                    yield State::Token(token.finish(quote_state.take_option()), line_count);
+                    co.yield_(State::Token(
+                        token.finish(quote_state.take_option()),
+                        line_count,
+                    ))
+                    .await;
                 }
                 continue;
             }
             '{' | '}' => {
                 if !token.str.is_empty() {
                     token_empty = false;
-                    yield State::Token(token.finish(quote_state.take_option()), line_count);
+                    co.yield_(State::Token(
+                        token.finish(quote_state.take_option()),
+                        line_count,
+                    ))
+                    .await;
                 }
                 token.str.push(ch);
-                yield State::Token(token.finish(quote_state.take_option()), line_count);
+                co.yield_(State::Token(
+                    token.finish(quote_state.take_option()),
+                    line_count,
+                ))
+                .await;
                 continue;
             }
             // skip comment
@@ -88,31 +105,22 @@ gen fn tokenizer(content: &str) -> State {
     }
     if !token.str.is_empty() {
         token_empty = false;
-        yield State::Token(token.finish(quote_state.take_option()), line_count);
+        co.yield_(State::Token(
+            token.finish(quote_state.take_option()),
+            line_count,
+        ))
+        .await;
     }
     if !token_empty {
-        yield State::NewLine(line_count);
+        co.yield_(State::NewLine(line_count)).await;
     }
-}
-
-pub fn gen_tokenizer(content: &str) -> Tokenizer<impl Iterator<Item = State>> {
-    let g = tokenizer(content);
-    Tokenizer::new(g.peekable())
-}
-
-#[macro_export]
-macro_rules! gen_tokenizer {
-    ($name:ident, $content:expr) => {
-        use $crate::tokenizer::*;
-        #[allow(unused_mut)]
-        let mut $name = gen_tokenizer($content);
-    };
 }
 
 #[test]
 fn test_tokenizer() {
-    let content = std::fs::read_to_string("tests/test0.conf").unwrap();
-    let iter = tokenizer(&content);
+    use crate::gen_iter;
+    let content = include_str!("../../../tests/test0.conf");
+    gen_iter!(iter, |co| tokenizer(co, content));
     for token in iter {
         println!("{:?}", token);
     }

@@ -6,9 +6,9 @@ mod nightly;
 pub use nightly::*;
 
 #[cfg(not(feature = "nightly"))]
-mod stable;
+mod stackless;
 #[cfg(not(feature = "nightly"))]
-pub use stable::*;
+pub use stackless::*;
 
 #[derive(Debug)]
 pub enum State {
@@ -89,6 +89,9 @@ impl<T> Tokenizer<T>
 where
     T: Iterator<Item = State>,
 {
+    pub fn new(tokenizer: Peekable<T>) -> Self {
+        Self { tokenizer, line: 1 }
+    }
     pub fn line(&self) -> usize {
         self.line
     }

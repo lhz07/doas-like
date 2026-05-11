@@ -14,9 +14,9 @@ use std::{
 };
 
 use crate::{
-    c, errx,
+    c, errx, gen_tokenizer,
     timestamp::FromStr,
-    tokenizer::{State, Tokenizer, gen_tokenizer},
+    tokenizer::{State, Tokenizer},
 };
 
 #[derive(Debug)]
@@ -444,7 +444,8 @@ impl Config {
         file.read_to_string(&mut content)
             .map_err(|e| ConfigError::IO(e, path))?;
         let mut rules = Vec::new();
-        let mut tokenizer = gen_tokenizer(&content);
+        gen_tokenizer!(tokenizer, &content);
+
         while tokenizer.next_line() {
             let rule = parser(&mut tokenizer)?;
             rules.push(rule);
