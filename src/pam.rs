@@ -4,12 +4,12 @@ use std::{
     process, ptr,
 };
 
-use libc::{c_char, c_int, c_void};
+use libc::{LOG_AUTHPRIV, LOG_NOTICE, c_char, c_int, c_void};
 use zeroize::Zeroizing;
 
 use crate::{
     bindings::{self, pam_handle, pam_message, pam_response},
-    c, warn,
+    c, syslog, warn,
 };
 
 unsafe fn pam_prompt(msg: *const c_char, echo_on: bool) -> Result<CString, u32> {
@@ -131,13 +131,17 @@ pub fn pam_auth(target_user: &CStr, myname: &CStr) -> Result<(), ()> {
             e.to_string_lossy(),
         );
     }
-    c::pam_authenticate(pam_guard.pamh, 0)?;
+    if c::pam_authenticate(pam_guard.pamh, 0).is_err() {
+        syslog!(LOG_AUTHPRIV | LOG_NOTICE, "failed auth for {}", myname);
+        return Err(());
+    }
 
     // account not vaild or changing the auth token failed
     if let Err(ret) = c::pam_acct_mgmt(pam_guard.pamh, 0)
         && ((ret != bindings::PAM_NEW_AUTHTOK_REQD as i32)
             || c::pam_chauthtok(pam_guard.pamh, bindings::PAM_CHANGE_EXPIRED_AUTHTOK).is_err())
     {
+        syslog!(LOG_AUTHPRIV | LOG_NOTICE, "failed auth for {}", myname);
         return Err(());
     }
     // set PAM_USER to the user we want to be

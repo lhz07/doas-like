@@ -182,24 +182,6 @@ pub fn get_proc_info() -> Result<ProcessInfo, ()> {
     })
 }
 
-// pub fn get_boot_time() -> Result<Time, ()> {
-//     unsafe {
-//         let mut name = [libc::CTL_KERN, libc::KERN_BOOTTIME];
-//         let mut size = size_of::<timespec>();
-//         let mut boot_time: Time = mem::zeroed();
-//         libc::sysctl(
-//             name.as_mut_ptr(),
-//             name.len() as u32,
-//             &raw mut boot_time as _,
-//             &raw mut size,
-//             ptr::null_mut(),
-//             0,
-//         )
-//         .map_minus(|| warn!("sysctl get boot time"))?;
-//         Ok(boot_time)
-//     }
-// }
-
 /// # CLOCK_MONOTONIC_RAW
 /// clock that increments monotonically, tracking the time since an arbitrary point like
 /// CLOCK_MONOTONIC.  However, this clock is unaffected by frequency or time adjustments.  It
@@ -417,6 +399,21 @@ pub fn parse_gid(gid: &str) -> Result<gid_t, ()> {
         return Err(());
     }
     Ok(gid)
+}
+
+pub fn syslog(priority: c_int, msg: &CStr) {
+    unsafe {
+        // use %s, in case the msg contains a '%'
+        libc::syslog(priority, c"%s".as_ptr(), msg);
+    }
+}
+
+#[macro_export]
+macro_rules! syslog {
+    ($priority:expr, $fmt:literal $(, $arg:expr)* $(,)?) => {
+        let s = $crate::format_c!($fmt, $($arg,)*);
+        $crate::c::syslog($priority, &s);
+    };
 }
 
 pub fn perror(str: &CStr) {

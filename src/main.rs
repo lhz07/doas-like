@@ -4,8 +4,9 @@ use doas::{
     c::{self},
     command::CliArgs,
     config::{Config, check_config, permit},
-    errprint, errx, timestamp, verify,
+    errprint, errx, syslog, timestamp, verify,
 };
+use libc::{LOG_AUTHPRIV, LOG_INFO, LOG_NOTICE};
 use std::{
     env,
     ffi::{CStr, OsStr},
@@ -51,6 +52,19 @@ fn inner_main() -> Result<(), ()> {
         return check_config(&path, real_uid, &groups, target_uid, &argvs);
     }
 
+    let cmdline = {
+        let mut argvs = argvs.iter();
+        let mut buf = Vec::new();
+        if let Some(first) = argvs.next() {
+            buf.extend(first.as_bytes());
+            for str in argvs {
+                buf.push(' ' as u8);
+                buf.extend(str.as_bytes());
+            }
+        }
+        buf.push(0);
+        buf
+    };
     let cmd = &argvs[0];
     let cmd_args = &argvs[1..];
     let target_pw = c::getpwuid(target_uid)?;
@@ -63,13 +77,19 @@ fn inner_main() -> Result<(), ()> {
         Ok(c) => c,
         Err(e) => errx!("config error: {e}"),
     };
+    let myname = unsafe { CStr::from_ptr(mypw.pw_name) };
 
     let Some(rule) = permit(config, real_uid, &groups, target_uid, cmd, cmd_args) else {
+        syslog!(
+            LOG_AUTHPRIV | LOG_NOTICE,
+            "command not permitted for {}: {}",
+            myname,
+            cmdline
+        );
         let err = std::io::Error::from_raw_os_error(libc::EPERM);
         errx!("{err}");
     };
 
-    let myname = unsafe { CStr::from_ptr(mypw.pw_name) };
     let target_user = unsafe { CStr::from_ptr(target_pw.pw_name) };
     let mut persist_file = None;
     let persist_pass = {
@@ -102,6 +122,17 @@ fn inner_main() -> Result<(), ()> {
     c::setregid(target_pw.pw_gid, target_pw.pw_gid)?;
     unsafe { c::initgroups(target_pw.pw_name, target_pw.pw_gid as i32)? };
     c::setreuid(target_uid, target_uid)?;
+    if !rule.options.nolog {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("(failed)"));
+        syslog!(
+            LOG_AUTHPRIV | LOG_INFO,
+            "{} ran command {} as {} from {}",
+            myname,
+            cmdline,
+            target_user,
+            cwd,
+        );
+    }
     let envs = c::prep_env(&mypw, &target_pw, rule.options.keepenv, rule.options.envs);
     let err = process::Command::new(cmd)
         .args(cmd_args)

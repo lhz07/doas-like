@@ -10,10 +10,12 @@ pub mod bindings;
 pub mod c;
 pub mod command;
 pub mod config;
+pub mod display;
 pub mod insults;
 pub mod pam;
 pub mod timestamp;
 pub mod tokenizer;
+pub mod utils;
 pub mod verify;
 
 pub const CNAME: &CStr = c"doas";
