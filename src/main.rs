@@ -52,19 +52,7 @@ fn inner_main() -> Result<(), ()> {
         return check_config(&path, real_uid, &groups, target_uid, &argvs);
     }
 
-    let cmdline = {
-        let mut argvs = argvs.iter();
-        let mut buf = Vec::new();
-        if let Some(first) = argvs.next() {
-            buf.extend(first.as_bytes());
-            for str in argvs {
-                buf.push(' ' as u8);
-                buf.extend(str.as_bytes());
-            }
-        }
-        buf.push(0);
-        buf
-    };
+    let cmdline = argvs.join(" ".as_ref());
     let cmd = &argvs[0];
     let cmd_args = &argvs[1..];
     let target_pw = c::getpwuid(target_uid)?;

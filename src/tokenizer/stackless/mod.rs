@@ -14,6 +14,12 @@ pub struct Gen<'a, Y, F: Future> {
 
 pub struct InitState<Y, F: Future>(mem::MaybeUninit<State<Y, F>>);
 
+impl<Y, F: Future> Default for InitState<Y, F> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<Y, F: Future> InitState<Y, F> {
     pub fn new() -> Self {
         Self(mem::MaybeUninit::uninit())

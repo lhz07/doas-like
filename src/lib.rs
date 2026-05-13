@@ -10,7 +10,6 @@ pub mod bindings;
 pub mod c;
 pub mod command;
 pub mod config;
-pub mod display;
 pub mod insults;
 pub mod pam;
 pub mod timestamp;

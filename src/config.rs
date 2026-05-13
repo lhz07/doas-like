@@ -388,6 +388,7 @@ where
     Ok(config)
 }
 
+#[cfg_attr(miri, ignore = "miri doesn't support IO operation")]
 #[test]
 fn test_parse() {
     #[cfg(feature = "nightly")]

@@ -111,7 +111,7 @@ macro_rules! gen_tokenizer {
 
 #[test]
 fn test_tokenizer() {
-    let content = std::fs::read_to_string("tests/test0.conf").unwrap();
+    let content = include_str!("../../tests/test0.conf");
     let iter = tokenizer(&content);
     for token in iter {
         println!("{:?}", token);
