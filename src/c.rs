@@ -69,26 +69,42 @@ pub fn setprogname(name: &CStr) {
     unsafe { libc::setprogname(name.as_ptr()) }
 }
 
-/// It is guaranteed that the ptr in passwd is always valid
-pub struct Passwd {
-    pub passwd: libc::passwd,
-    _buf: Vec<i8>,
+pub struct Passwd<'a> {
+    pub pw_name: &'a CStr,
+    pub pw_passwd: &'a CStr,
+    pub pw_uid: uid_t,
+    pub pw_gid: gid_t,
+    pub pw_class: &'a CStr,
+    pub pw_gecos: &'a CStr,
+    pub pw_dir: &'a CStr,
+    pub pw_shell: &'a CStr,
 }
 
-impl std::ops::Deref for Passwd {
-    type Target = libc::passwd;
-    fn deref(&self) -> &Self::Target {
-        &self.passwd
+impl<'a> Passwd<'a> {
+    /// `buf` is used for lifetime inferring
+    unsafe fn new(passwd: libc::passwd, _buf: &'a Vec<c_char>) -> Self {
+        unsafe {
+            Self {
+                pw_name: CStr::from_ptr(passwd.pw_name),
+                pw_passwd: CStr::from_ptr(passwd.pw_passwd),
+                pw_uid: passwd.pw_uid,
+                pw_gid: passwd.pw_gid,
+                pw_class: CStr::from_ptr(passwd.pw_class),
+                pw_gecos: CStr::from_ptr(passwd.pw_gecos),
+                pw_dir: CStr::from_ptr(passwd.pw_dir),
+                pw_shell: CStr::from_ptr(passwd.pw_shell),
+            }
+        }
     }
 }
 
-pub fn getpwuid(uid: uid_t) -> Result<Passwd, ()> {
+pub fn getpwuid<'a>(uid: uid_t, buf: &'a mut Vec<c_char>) -> Result<Passwd<'a>, ()> {
     let mut pwd = unsafe { mem::zeroed() };
     let mut result = std::ptr::null_mut();
 
     let pwsz = unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) };
     let buflen = if pwsz > 0 { pwsz } else { 1024 };
-    let mut buf = vec![0; buflen as usize];
+    buf.resize(buflen as usize, 0);
     loop {
         let rv = unsafe {
             libc::getpwuid_r(
@@ -117,15 +133,13 @@ pub fn getpwuid(uid: uid_t) -> Result<Passwd, ()> {
     // we have checked result is not null
     let passwd = unsafe { *result };
 
-    let passwd = Passwd { passwd, _buf: buf };
+    let passwd = unsafe { Passwd::new(passwd, buf) };
 
     Ok(passwd)
 }
 
-/// # Safety
-/// `user` should be valid ptr
-pub unsafe fn initgroups(user: *const c_char, basegroup: c_int) -> Result<(), ()> {
-    unsafe { libc::initgroups(user, basegroup).map(|| errprint!("initgroups")) }
+pub fn initgroups(user: &CStr, basegroup: c_int) -> Result<(), ()> {
+    unsafe { libc::initgroups(user.as_ptr(), basegroup).map(|| errprint!("initgroups")) }
 }
 
 pub fn getpid() -> pid_t {
@@ -295,28 +309,26 @@ pub fn pam_end(pamh: &mut pam_handle_t, status: c_int) -> c_int {
     unsafe { bindings::pam_end(pamh, status) }
 }
 
-unsafe fn c_to_os(ptr: *const c_char) -> OsString {
-    OsStr::from_bytes(unsafe { CStr::from_ptr(ptr) }.to_bytes()).to_os_string()
+fn c_to_os(str: &CStr) -> OsString {
+    OsStr::from_bytes(str.to_bytes()).to_os_string()
 }
 
-fn create_env(mypw: &libc::passwd, target_pw: &libc::passwd) -> HashMap<OsString, OsString> {
+fn create_env(mypw: &Passwd, target_pw: &Passwd) -> HashMap<OsString, OsString> {
     let copyset = ["DISPLAY", "TERM", "PATH"];
     let mut envs = HashMap::new();
-    unsafe {
-        envs.insert("DOAS_USER".into(), c_to_os(mypw.pw_name));
-        envs.insert("HOME".into(), c_to_os(target_pw.pw_dir));
-        envs.insert("LOGNAME".into(), c_to_os(target_pw.pw_name));
-        envs.insert("SHELL".into(), c_to_os(target_pw.pw_shell));
-        envs.insert("USER".into(), c_to_os(target_pw.pw_name));
-    }
+    envs.insert("DOAS_USER".into(), c_to_os(mypw.pw_name));
+    envs.insert("HOME".into(), c_to_os(target_pw.pw_dir));
+    envs.insert("LOGNAME".into(), c_to_os(target_pw.pw_name));
+    envs.insert("SHELL".into(), c_to_os(target_pw.pw_shell));
+    envs.insert("USER".into(), c_to_os(target_pw.pw_name));
     fill_env_inherit(&copyset, &mut envs);
 
     envs
 }
 
 pub fn prep_env(
-    mypw: &libc::passwd,
-    target_pw: &libc::passwd,
+    mypw: &Passwd,
+    target_pw: &Passwd,
     keepenv: bool,
     setenvs: Vec<Env>,
 ) -> HashMap<OsString, OsString> {
