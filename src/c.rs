@@ -440,7 +440,7 @@ pub fn syslog(priority: c_int, msg: &CStr) {
 #[macro_export]
 macro_rules! syslog {
     ($priority:expr, $fmt:literal $(, $arg:expr)* $(,)?) => {
-        let s = $crate::format_c!($fmt, $($arg,)*);
+        let s = $crate::c_format!($fmt, $($arg,)*);
         $crate::c::syslog($priority, &s);
     };
 }
@@ -449,6 +449,15 @@ pub fn perror(str: &CStr) {
     unsafe {
         libc::perror(str.as_ptr());
     }
+}
+
+#[macro_export]
+macro_rules! perror {
+    ($($arg:tt)*) => {
+        let args = $crate::c_format_args!($($arg)*);
+        let s = $crate::c_format!("{}: {}", $crate::NAME, args);
+        $crate::c::perror(&s);
+    };
 }
 
 trait MapErrNo {

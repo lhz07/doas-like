@@ -125,16 +125,16 @@ macro_rules! count_args {
 }
 
 #[macro_export]
-macro_rules! format_c {
+macro_rules! c_format{
     ($fmt:literal $(, $arg:expr)* $(,)?) => {{
         #[allow(unused_imports)]
-        use $crate::utils::convert::StrToBytes;
+        use $crate::utils::convert::WriteStrToBytes;
         #[allow(unused_imports)]
-        use $crate::utils::convert::SpecificToBytes;
+        use $crate::utils::convert::WriteToBytes;
+        use $crate::utils::convert::FmtWriter;
         use $crate::utils::fmt::*;
         use $crate::utils::array::Array;
         use std::ffi::CString;
-        use std::borrow::Cow;
 
         const ARG_COUNT: usize = $crate::count_args!($($arg,)*);
         // Maximum possible number of parts:
@@ -148,14 +148,18 @@ macro_rules! format_c {
         const PARTS: Array<MAX_PARTS, Part<'_>> = format_str::<MAX_PARTS>(BYTES.as_slice());
         #[allow(unused_mut)]
         let mut count = BYTES_LEN;
-        let arrays: [Cow<'_, [u8]>; _] = [ $( { let a = $arg.to_raw_bytes(); count += a.len(); a }),* ];
+        let arrays: [FmtWriter<'_>; _] = [ $( {
+            let writer = $arg.get_writer();
+            count += writer.len();
+            writer
+        }),* ];
         let mut args = arrays.iter();
         let mut buf = Vec::with_capacity(count);
         for part in PARTS.as_slice(){
             match part{
                 Part::Arg => {
-                    let bytes = args.next().expect("we have checked args == ARG_COUNT at compile time");
-                    buf.extend(bytes.as_ref());
+                    let writer = args.next().expect("we have checked args == ARG_COUNT at compile time");
+                    writer.write(&mut buf);
                 }
                 Part::Text(str) => {
                     buf.extend(str.as_bytes());
@@ -169,8 +173,42 @@ macro_rules! format_c {
             }
         }
         buf.push(0);
+        debug_assert_eq!(count, buf.len(), "exact estimate!");
         // Safety: we have replaced all nul bytes and pushed a `0` at the end.
         unsafe { CString::from_vec_with_nul_unchecked(buf) }
+    }};
+}
+
+#[macro_export]
+macro_rules! c_format_args{
+    ($fmt:literal $(, $arg:expr)* $(,)?) => {{
+        #[allow(unused_imports)]
+        use $crate::utils::convert::*;
+        use $crate::utils::fmt::*;
+        use $crate::utils::array::Array;
+
+        const ARG_COUNT: usize = $crate::count_args!($($arg,)*);
+        // Maximum possible number of parts:
+        // text + arg + text + ...
+        const MAX_PARTS: usize = ARG_COUNT * 2 + 1;
+        const N: usize = $fmt.len();
+        const BYTES: Array<N, u8> = prep_str::<N>($fmt.as_bytes(), ARG_COUNT);
+        // Final static byte count excluding placeholders
+        const BYTES_LEN: usize = BYTES.len() - ARG_COUNT;
+        const PARTS: Array<MAX_PARTS, Part<'_>> = format_str::<MAX_PARTS>(BYTES.as_slice());
+        #[allow(unused_mut)]
+        let mut count = BYTES_LEN;
+        let arrays: [FmtWriter<'_>; _] = [ $( {
+            let writer = $arg.get_writer();
+            count += writer.len();
+            writer
+        }),* ];
+
+        CArgs{
+            parts: PARTS,
+            args: arrays,
+            count,
+        }
     }};
 }
 
@@ -186,10 +224,18 @@ fn prepare_str() {
 
 #[test]
 fn format_macro() {
-    let cstr = format_c!("{{hello}}, {} {}", "world", c"and cstr");
+    let cstr = c_format!("{{hello}}, {} {}", "world", c"and cstr");
     assert_eq!(c"{hello}, world and cstr", &cstr);
-    let cstr = format_c!("{} {}", "hello", c"world");
+    let cstr = c_format!("{} {}", "hello", c"world");
     assert_eq!(c"hello world", &cstr);
-    let cstr = format_c!("hello, world");
+    let cstr = c_format!("hello, world");
     assert_eq!(c"hello, world", &cstr);
+}
+
+#[test]
+fn format_args() {
+    let c = std::ffi::CString::from(c"world");
+    let a = c_format_args!("hello, {}", c);
+    let cstr = c_format!("doas: {}", a);
+    assert_eq!(c"doas: hello, world", &cstr);
 }
