@@ -22,7 +22,7 @@ pub trait SpecificToBytes {
     fn to_raw_bytes<'a>(&'a self) -> Cow<'a, [u8]>;
 }
 
-impl SpecificToBytes for &CStr {
+impl SpecificToBytes for CStr {
     fn to_raw_bytes<'a>(&'a self) -> Cow<'a, [u8]> {
         self.to_bytes().into()
     }

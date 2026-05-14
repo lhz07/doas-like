@@ -3,6 +3,7 @@ use crate::{
     config::{Env, Val},
     err, errprint, errx,
     timestamp::Time,
+    utils::selfref::{OwnedRef, SelfRef},
     warn,
 };
 use libc::{c_char, c_int, clockid_t, gid_t, pid_t, uid_t};
@@ -69,42 +70,49 @@ pub fn setprogname(name: &CStr) {
     unsafe { libc::setprogname(name.as_ptr()) }
 }
 
-pub struct Passwd<'a> {
-    pub pw_name: &'a CStr,
-    pub pw_passwd: &'a CStr,
+#[non_exhaustive]
+pub struct Passwd {
+    pub pw_name: OwnedRef<CStr>,
+    pub pw_passwd: OwnedRef<CStr>,
     pub pw_uid: uid_t,
     pub pw_gid: gid_t,
-    pub pw_class: &'a CStr,
-    pub pw_gecos: &'a CStr,
-    pub pw_dir: &'a CStr,
-    pub pw_shell: &'a CStr,
+    pub pw_class: OwnedRef<CStr>,
+    pub pw_gecos: OwnedRef<CStr>,
+    pub pw_dir: OwnedRef<CStr>,
+    pub pw_shell: OwnedRef<CStr>,
 }
 
-impl<'a> Passwd<'a> {
-    /// `buf` is used for lifetime inferring
-    unsafe fn new(passwd: libc::passwd, _buf: &'a Vec<c_char>) -> Self {
+impl std::ops::Deref for Passwd {
+    type Target = Self;
+    fn deref(&self) -> &Self::Target {
+        self
+    }
+}
+
+impl Passwd {
+    unsafe fn new(passwd: *const libc::passwd) -> Self {
         unsafe {
             Self {
-                pw_name: CStr::from_ptr(passwd.pw_name),
-                pw_passwd: CStr::from_ptr(passwd.pw_passwd),
-                pw_uid: passwd.pw_uid,
-                pw_gid: passwd.pw_gid,
-                pw_class: CStr::from_ptr(passwd.pw_class),
-                pw_gecos: CStr::from_ptr(passwd.pw_gecos),
-                pw_dir: CStr::from_ptr(passwd.pw_dir),
-                pw_shell: CStr::from_ptr(passwd.pw_shell),
+                pw_name: OwnedRef::new(CStr::from_ptr((*passwd).pw_name)),
+                pw_passwd: OwnedRef::new(CStr::from_ptr((*passwd).pw_passwd)),
+                pw_uid: (*passwd).pw_uid,
+                pw_gid: (*passwd).pw_gid,
+                pw_class: OwnedRef::new(CStr::from_ptr((*passwd).pw_class)),
+                pw_gecos: OwnedRef::new(CStr::from_ptr((*passwd).pw_gecos)),
+                pw_dir: OwnedRef::new(CStr::from_ptr((*passwd).pw_dir)),
+                pw_shell: OwnedRef::new(CStr::from_ptr((*passwd).pw_shell)),
             }
         }
     }
 }
 
-pub fn getpwuid<'a>(uid: uid_t, buf: &'a mut Vec<c_char>) -> Result<Passwd<'a>, ()> {
+pub fn getpwuid(uid: uid_t) -> Result<SelfRef<Passwd, Vec<c_char>>, ()> {
     let mut pwd = unsafe { mem::zeroed() };
     let mut result = std::ptr::null_mut();
 
     let pwsz = unsafe { libc::sysconf(libc::_SC_GETPW_R_SIZE_MAX) };
     let buflen = if pwsz > 0 { pwsz } else { 1024 };
-    buf.resize(buflen as usize, 0);
+    let mut buf = vec![0; buflen as usize];
     loop {
         let rv = unsafe {
             libc::getpwuid_r(
@@ -130,10 +138,12 @@ pub fn getpwuid<'a>(uid: uid_t, buf: &'a mut Vec<c_char>) -> Result<Passwd<'a>, 
     if result.is_null() {
         errx!("no passwd entry for uid {uid}");
     }
-    // we have checked result is not null
-    let passwd = unsafe { *result };
 
-    let passwd = unsafe { Passwd::new(passwd, buf) };
+    // we have checked result is not null
+    let passwd = unsafe {
+        let passwd = Passwd::new(result);
+        SelfRef::pin_new(passwd, buf)
+    };
 
     Ok(passwd)
 }
@@ -309,6 +319,7 @@ pub fn pam_end(pamh: &mut pam_handle_t, status: c_int) -> c_int {
     unsafe { bindings::pam_end(pamh, status) }
 }
 
+#[inline]
 fn c_to_os(str: &CStr) -> OsString {
     OsStr::from_bytes(str.to_bytes()).to_os_string()
 }
@@ -316,11 +327,11 @@ fn c_to_os(str: &CStr) -> OsString {
 fn create_env(mypw: &Passwd, target_pw: &Passwd) -> HashMap<OsString, OsString> {
     let copyset = ["DISPLAY", "TERM", "PATH"];
     let mut envs = HashMap::new();
-    envs.insert("DOAS_USER".into(), c_to_os(mypw.pw_name));
-    envs.insert("HOME".into(), c_to_os(target_pw.pw_dir));
-    envs.insert("LOGNAME".into(), c_to_os(target_pw.pw_name));
-    envs.insert("SHELL".into(), c_to_os(target_pw.pw_shell));
-    envs.insert("USER".into(), c_to_os(target_pw.pw_name));
+    envs.insert("DOAS_USER".into(), c_to_os(&mypw.pw_name));
+    envs.insert("HOME".into(), c_to_os(&target_pw.pw_dir));
+    envs.insert("LOGNAME".into(), c_to_os(&target_pw.pw_name));
+    envs.insert("SHELL".into(), c_to_os(&target_pw.pw_shell));
+    envs.insert("USER".into(), c_to_os(&target_pw.pw_name));
     fill_env_inherit(&copyset, &mut envs);
 
     envs

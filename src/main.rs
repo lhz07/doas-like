@@ -32,8 +32,7 @@ fn inner_main() -> Result<(), ()> {
         Some(uid) => c::parse_uid(&uid).inspect_err(|_| errprint!("unknown user"))?,
         None => 0,
     };
-    let mut my_buf = Vec::new();
-    let mypw = c::getpwuid(real_uid, &mut my_buf)?;
+    let mypw = c::getpwuid(real_uid)?;
     let groups = c::getgroups()?;
 
     let argvs = if args.shell {
@@ -55,8 +54,7 @@ fn inner_main() -> Result<(), ()> {
     let cmdline = argvs.join(" ".as_ref());
     let cmd = &argvs[0];
     let cmd_args = &argvs[1..];
-    let mut target_buf = Vec::new();
-    let target_pw = c::getpwuid(target_uid, &mut target_buf)?;
+    let target_pw = c::getpwuid(target_uid)?;
 
     if origin_euid != 0 {
         errx!("not installed setuid");
@@ -96,7 +94,7 @@ fn inner_main() -> Result<(), ()> {
         // downgrade to real uid
         c::seteuid(real_uid)?;
         // authenticate user
-        verify::auth(target_pw.pw_name, mypw.pw_name, rule.options.insult)?;
+        verify::auth(&target_pw.pw_name, &mypw.pw_name, rule.options.insult)?;
         // upgrade to euid
         c::setreuid(0, 0)?;
     }
@@ -107,7 +105,7 @@ fn inner_main() -> Result<(), ()> {
     }
 
     c::setregid(target_pw.pw_gid, target_pw.pw_gid)?;
-    c::initgroups(target_pw.pw_name, target_pw.pw_gid as i32)?;
+    c::initgroups(&target_pw.pw_name, target_pw.pw_gid as i32)?;
     c::setreuid(target_uid, target_uid)?;
     if !rule.options.nolog {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("(failed)"));
@@ -120,7 +118,6 @@ fn inner_main() -> Result<(), ()> {
             cwd,
         );
     }
-    // let c = &my_buf;
     let envs = c::prep_env(&mypw, &target_pw, rule.options.keepenv, rule.options.envs);
     let err = process::Command::new(cmd)
         .args(cmd_args)
