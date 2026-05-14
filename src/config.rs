@@ -515,6 +515,10 @@ impl Config {
 
         Ok(())
     }
+
+    pub fn has_cmd(&self) -> bool {
+        self.cmd.is_some()
+    }
 }
 
 #[must_use = "you should always check this"]

@@ -1,6 +1,7 @@
 use crate::{
+    SAFE_PATH,
     bindings::{self, pam_handle_t, proc_bsdinfo},
-    config::{Env, Val},
+    config::{Config, Env, Val},
     err, errprint, errx,
     timestamp::Time,
     utils::selfref::{OwnedRef, SelfRef},
@@ -16,6 +17,8 @@ use std::{
     os::unix::ffi::OsStrExt,
 };
 
+// very simple bindings -------------------------------------------
+
 pub fn getuid() -> uid_t {
     unsafe { libc::getuid() }
 }
@@ -24,8 +27,45 @@ pub fn getgid() -> gid_t {
     unsafe { libc::getgid() }
 }
 
+pub fn geteuid() -> uid_t {
+    unsafe { libc::geteuid() }
+}
+
+pub fn getpid() -> pid_t {
+    unsafe { libc::getpid() }
+}
+
+pub fn getppid() -> pid_t {
+    unsafe { libc::getppid() }
+}
+
+// very simple bindings -------------------------------------------
+
+pub fn setprogname(name: &CStr) {
+    unsafe { libc::setprogname(name.as_ptr()) }
+}
+
+pub fn setuid(uid: uid_t) -> Result<(), ()> {
+    unsafe { libc::setuid(uid).map(|| errprint!("setuid")) }
+}
+
+pub fn seteuid(uid: uid_t) -> Result<(), ()> {
+    unsafe { libc::seteuid(uid).map(|| errprint!("seteuid")) }
+}
+
+pub fn setreuid(ruid: uid_t, euid: uid_t) -> Result<(), ()> {
+    unsafe { libc::setreuid(ruid, euid).map(|| errprint!("setreuid")) }
+}
+
+pub fn setregid(rgid: uid_t, egid: uid_t) -> Result<(), ()> {
+    unsafe { libc::setregid(rgid, egid).map(|| errprint!("setregid")) }
+}
+
 pub fn getgroups() -> Result<Vec<gid_t>, ()> {
     use bindings::NGROUPS_MAX;
+    // on macOS, NGROUPS_MAX is 16, while on Linux,
+    // NGROUPS_MAX is 65536, that's too big for a stack array.
+    // So we use stack array temporarily, then copy it to a Vec.
     unsafe {
         let mut groups = [0; NGROUPS_MAX as usize];
         let ngroups = libc::getgroups(NGROUPS_MAX as i32, groups.as_mut_ptr());
@@ -46,31 +86,6 @@ pub fn get_all_groups() -> Result<Vec<gid_t>, ()> {
     Ok(groups)
 }
 
-pub fn geteuid() -> uid_t {
-    unsafe { libc::geteuid() }
-}
-
-pub fn setuid(uid: uid_t) -> Result<(), ()> {
-    unsafe { libc::setuid(uid).map(|| errprint!("setuid")) }
-}
-
-pub fn seteuid(uid: uid_t) -> Result<(), ()> {
-    unsafe { libc::seteuid(uid).map(|| errprint!("seteuid")) }
-}
-
-pub fn setreuid(ruid: uid_t, euid: uid_t) -> Result<(), ()> {
-    unsafe { libc::setreuid(ruid, euid).map(|| errprint!("setreuid")) }
-}
-
-pub fn setregid(rgid: uid_t, egid: uid_t) -> Result<(), ()> {
-    unsafe { libc::setregid(rgid, egid).map(|| errprint!("setregid")) }
-}
-
-pub fn setprogname(name: &CStr) {
-    unsafe { libc::setprogname(name.as_ptr()) }
-}
-
-#[non_exhaustive]
 pub struct Passwd {
     pub pw_name: OwnedRef<CStr>,
     pub pw_passwd: OwnedRef<CStr>,
@@ -80,13 +95,6 @@ pub struct Passwd {
     pub pw_gecos: OwnedRef<CStr>,
     pub pw_dir: OwnedRef<CStr>,
     pub pw_shell: OwnedRef<CStr>,
-}
-
-impl std::ops::Deref for Passwd {
-    type Target = Self;
-    fn deref(&self) -> &Self::Target {
-        self
-    }
 }
 
 impl Passwd {
@@ -142,7 +150,7 @@ pub fn getpwuid(uid: uid_t) -> Result<SelfRef<Passwd, Vec<c_char>>, ()> {
     // we have checked result is not null
     let passwd = unsafe {
         let passwd = Passwd::new(result);
-        SelfRef::pin_new(passwd, buf)
+        SelfRef::new(passwd, buf)
     };
 
     Ok(passwd)
@@ -150,14 +158,6 @@ pub fn getpwuid(uid: uid_t) -> Result<SelfRef<Passwd, Vec<c_char>>, ()> {
 
 pub fn initgroups(user: &CStr, basegroup: c_int) -> Result<(), ()> {
     unsafe { libc::initgroups(user.as_ptr(), basegroup).map(|| errprint!("initgroups")) }
-}
-
-pub fn getpid() -> pid_t {
-    unsafe { libc::getpid() }
-}
-
-pub fn getppid() -> pid_t {
-    unsafe { libc::getppid() }
 }
 
 pub fn getsid(pid: pid_t) -> Result<pid_t, ()> {
@@ -325,7 +325,7 @@ fn c_to_os(str: &CStr) -> OsString {
 }
 
 fn create_env(mypw: &Passwd, target_pw: &Passwd) -> HashMap<OsString, OsString> {
-    let copyset = ["DISPLAY", "TERM", "PATH"];
+    let copyset = ["DISPLAY", "TERM"];
     let mut envs = HashMap::new();
     envs.insert("DOAS_USER".into(), c_to_os(&mypw.pw_name));
     envs.insert("HOME".into(), c_to_os(&target_pw.pw_dir));
@@ -337,17 +337,23 @@ fn create_env(mypw: &Passwd, target_pw: &Passwd) -> HashMap<OsString, OsString> 
     envs
 }
 
-pub fn prep_env(
-    mypw: &Passwd,
-    target_pw: &Passwd,
-    keepenv: bool,
-    setenvs: Vec<Env>,
-) -> HashMap<OsString, OsString> {
+fn set_path(envs: &mut HashMap<OsString, OsString>, has_cmd: bool) {
+    const PATH: &str = "PATH";
+    let val = if !has_cmd && let Some(val) = env::var_os(PATH) {
+        val
+    } else {
+        SAFE_PATH.into()
+    };
+    envs.insert(PATH.into(), val);
+}
+
+pub fn prep_env(mypw: &Passwd, target_pw: &Passwd, rule: Config) -> HashMap<OsString, OsString> {
     let mut envs = create_env(mypw, target_pw);
-    if keepenv {
+    set_path(&mut envs, rule.has_cmd());
+    if rule.options.keepenv {
         keep_envs(&mut envs);
     }
-    apply_rule_envs(setenvs, &mut envs);
+    apply_rule_envs(&mut envs, rule.options.envs);
     envs
 }
 
@@ -358,7 +364,7 @@ fn keep_envs(envs: &mut HashMap<OsString, OsString>) {
     }
 }
 
-fn apply_rule_envs(setenvs: Vec<Env>, envs: &mut HashMap<OsString, OsString>) {
+fn apply_rule_envs(envs: &mut HashMap<OsString, OsString>, setenvs: Vec<Env>) {
     for env in setenvs {
         match env {
             Env::Keep(key) => {

@@ -20,6 +20,7 @@ pub mod verify;
 pub const CNAME: &CStr = c"doas";
 pub const NAME: &str = "doas";
 pub const CONF_PATH: &str = "/etc/doas.conf";
+pub const SAFE_PATH: &str = "/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin";
 
 #[macro_export]
 macro_rules! errx {

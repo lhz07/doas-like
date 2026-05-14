@@ -118,7 +118,7 @@ fn inner_main() -> Result<(), ()> {
             cwd,
         );
     }
-    let envs = c::prep_env(&mypw, &target_pw, rule.options.keepenv, rule.options.envs);
+    let envs = c::prep_env(&mypw, &target_pw, rule);
     let err = process::Command::new(cmd)
         .args(cmd_args)
         .env_clear()

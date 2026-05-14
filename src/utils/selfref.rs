@@ -1,30 +1,18 @@
-use std::{ops::Deref, pin::Pin};
+use std::ops::Deref;
 
-pub struct SelfRef<T: Deref, S> {
-    data: Pin<T>,
-    _buf: Pin<S>,
+pub struct SelfRef<T, S> {
+    data: T,
+    _buf: S,
 }
 
-impl<T: Deref, S> SelfRef<T, S> {
-    pub fn pin_new(data: T, buf: S) -> Self
-    where
-        <T as Deref>::Target: Unpin,
-        S: Deref,
-        <S as Deref>::Target: Unpin,
-    {
-        Self {
-            data: Pin::new(data),
-            _buf: Pin::new(buf),
-        }
-    }
-
-    pub fn new(data: Pin<T>, buf: Pin<S>) -> Self {
+impl<T, S> SelfRef<T, S> {
+    pub fn new(data: T, buf: S) -> Self {
         Self { data, _buf: buf }
     }
 }
 
-impl<T: Deref, S> Deref for SelfRef<T, S> {
-    type Target = T::Target;
+impl<T, S> Deref for SelfRef<T, S> {
+    type Target = T;
     fn deref(&self) -> &Self::Target {
         &self.data
     }
@@ -40,7 +28,7 @@ impl<T: 'static + ?Sized> OwnedRef<T> {
     }
 }
 
-impl<T: 'static + ?Sized> std::ops::Deref for OwnedRef<T> {
+impl<T: 'static + ?Sized> Deref for OwnedRef<T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
         self.data
