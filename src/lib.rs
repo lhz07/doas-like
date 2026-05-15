@@ -33,9 +33,23 @@ macro_rules! errx {
 #[macro_export]
 macro_rules! err {
     ($($arg:tt)*) => {{
-        eprint!("{}: {}: ", $crate::NAME, format_args!($($arg)*));
-        $crate::c::perror(c"");
+        $crate::perror!($($arg)*);
         return Err(());
+    }};
+}
+
+#[macro_export]
+macro_rules! warnx {
+    ($($arg:tt)*) => {{
+        eprintln!("{} warning: {}", $crate::NAME, format_args!($($arg)*));
+    }};
+}
+
+#[macro_export]
+macro_rules! warn {
+    ($($arg:tt)*) => {{
+        let args = $crate::c_format_args!($($arg)*);
+        $crate::perror!("warning: {}", args);
     }};
 }
 
@@ -43,12 +57,5 @@ macro_rules! err {
 macro_rules! errprint {
     ($($arg:tt)*) => {{
         eprintln!("{}: {}", $crate::NAME, format_args!($($arg)*));
-    }};
-}
-
-#[macro_export]
-macro_rules! warn {
-    ($($arg:tt)*) => {{
-        eprintln!("{} warning: {}", $crate::NAME, format_args!($($arg)*));
     }};
 }

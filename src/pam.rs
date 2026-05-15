@@ -9,7 +9,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     bindings::{self, pam_handle, pam_message, pam_response},
-    c, syslog, warn,
+    c, syslog, warnx,
 };
 
 unsafe fn pam_prompt(msg: *const c_char, echo_on: bool) -> Result<CString, u32> {
@@ -55,8 +55,8 @@ unsafe extern "C" fn pamconv(
                 response.push(rsp);
             }
             bindings::PAM_ERROR_MSG | bindings::PAM_TEXT_INFO => {
-                let msg = unsafe { CStr::from_ptr(msg.msg).to_string_lossy() };
-                eprintln!("{}", msg);
+                let msg = unsafe { CStr::from_ptr(msg.msg) };
+                eprintln!("{:?}", msg);
             }
             _ => {
                 eprintln!("invalid PAM msg_style {}", msg.msg_style);
@@ -125,11 +125,7 @@ pub fn pam_auth(target_user: &CStr, myname: &CStr) -> Result<(), ()> {
         }
     };
     if let Err(e) = c::pam_set_item(pam_guard.pamh, bindings::PAM_RUSER as i32, myname) {
-        warn!(
-            "pam_set_item(?, PAM_RUSER, \"{}\"): {}",
-            myname.to_string_lossy(),
-            e.to_string_lossy(),
-        );
+        warnx!("pam_set_item(?, PAM_RUSER, {:?}): {:?}", myname, e);
     }
     if c::pam_authenticate(pam_guard.pamh, 0).is_err() {
         syslog!(LOG_AUTHPRIV | LOG_NOTICE, "failed auth for {}", myname);
@@ -146,18 +142,11 @@ pub fn pam_auth(target_user: &CStr, myname: &CStr) -> Result<(), ()> {
     }
     // set PAM_USER to the user we want to be
     if let Err(e) = c::pam_set_item(pam_guard.pamh, bindings::PAM_USER as i32, target_user) {
-        warn!(
-            "pam_set_item(?, PAM_USER, \"{}\"): {}",
-            target_user.to_string_lossy(),
-            e.to_string_lossy()
-        );
+        warnx!("pam_set_item(?, PAM_USER, {:?}): {:?}", target_user, e);
     }
 
     if let Err((_, e)) = c::pam_setcred(pam_guard.pamh, bindings::PAM_REINITIALIZE_CRED) {
-        warn!(
-            "pam_setcred(?, PAM_REINITIALIZE_CRED): {}",
-            e.to_string_lossy()
-        );
+        warnx!("pam_setcred(?, PAM_REINITIALIZE_CRED): {:?}", e);
     } else {
         pam_guard.cred = 1;
     }
@@ -180,10 +169,7 @@ impl Drop for PamGuard<'_> {
             && let Err((ret, e)) =
                 c::pam_setcred(self.pamh, bindings::PAM_DELETE_CRED | bindings::PAM_SILENT)
         {
-            warn!(
-                "pam_setcred(?, PAM_DELETE_CRED | PAM_SILENT): {}",
-                e.to_string_lossy()
-            );
+            warnx!("pam_setcred(?, PAM_DELETE_CRED | PAM_SILENT): {:?}", e);
             status = ret;
         }
         c::pam_end(self.pamh, status);

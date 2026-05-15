@@ -1,5 +1,5 @@
 use crate::bindings::timespec;
-use crate::{c, err, errx, warn};
+use crate::{c, err, errx, warnx};
 use std::time::Duration;
 use std::{
     cmp,
@@ -160,7 +160,7 @@ pub fn check(file: &File, timeout: Duration) -> Result<bool, ()> {
     }
     // check if timestamp is too far in the future
     if expire_boot_time > boot_time + timeout || expire_real_time > real_time + timeout {
-        warn!("timestamp too far in the future");
+        warnx!("timestamp too far in the future");
         return Ok(false);
     }
     Ok(true)

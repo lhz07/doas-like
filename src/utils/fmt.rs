@@ -175,6 +175,7 @@ macro_rules! c_format{
         buf.push(0);
         debug_assert_eq!(count, buf.len(), "exact estimate!");
         // Safety: we have replaced all nul bytes and pushed a `0` at the end.
+        #[allow(unused_unsafe)]
         unsafe { CString::from_vec_with_nul_unchecked(buf) }
     }};
 }

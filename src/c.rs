@@ -9,13 +9,21 @@ use crate::{
 };
 use libc::{c_char, c_int, clockid_t, gid_t, pid_t, uid_t};
 use std::{
-    borrow::Cow,
     collections::HashMap,
     env,
     ffi::{CStr, CString, OsStr, OsString},
     io, mem,
     os::unix::ffi::OsStrExt,
 };
+
+#[macro_export]
+macro_rules! perror {
+    ($($arg:tt)*) => {{
+        let args = $crate::c_format_args!($($arg)*);
+        let s = $crate::c_format!("{}: {}", $crate::NAME, args);
+        $crate::c::perror(&s);
+    }};
+}
 
 // very simple bindings -------------------------------------------
 
@@ -46,19 +54,19 @@ pub fn setprogname(name: &CStr) {
 }
 
 pub fn setuid(uid: uid_t) -> Result<(), ()> {
-    unsafe { libc::setuid(uid).map(|| errprint!("setuid")) }
+    unsafe { libc::setuid(uid).map(|| perror!("setuid")) }
 }
 
 pub fn seteuid(uid: uid_t) -> Result<(), ()> {
-    unsafe { libc::seteuid(uid).map(|| errprint!("seteuid")) }
+    unsafe { libc::seteuid(uid).map(|| perror!("seteuid")) }
 }
 
 pub fn setreuid(ruid: uid_t, euid: uid_t) -> Result<(), ()> {
-    unsafe { libc::setreuid(ruid, euid).map(|| errprint!("setreuid")) }
+    unsafe { libc::setreuid(ruid, euid).map(|| perror!("setreuid")) }
 }
 
 pub fn setregid(rgid: uid_t, egid: uid_t) -> Result<(), ()> {
-    unsafe { libc::setregid(rgid, egid).map(|| errprint!("setregid")) }
+    unsafe { libc::setregid(rgid, egid).map(|| perror!("setregid")) }
 }
 
 pub fn getgroups() -> Result<Vec<gid_t>, ()> {
@@ -157,7 +165,7 @@ pub fn getpwuid(uid: uid_t) -> Result<SelfRef<Passwd, Vec<c_char>>, ()> {
 }
 
 pub fn initgroups(user: &CStr, basegroup: c_int) -> Result<(), ()> {
-    unsafe { libc::initgroups(user.as_ptr(), basegroup).map(|| errprint!("initgroups")) }
+    unsafe { libc::initgroups(user.as_ptr(), basegroup).map(|| perror!("initgroups")) }
 }
 
 pub fn getsid(pid: pid_t) -> Result<pid_t, ()> {
@@ -217,8 +225,7 @@ pub fn get_proc_info() -> Result<ProcessInfo, ()> {
 pub fn clock_gettime(clock_id: clockid_t) -> Result<Time, ()> {
     unsafe {
         let mut time: Time = mem::zeroed();
-        bindings::clock_gettime(clock_id, &raw mut time as _)
-            .map_minus(|| warn!("clock_gettime"))?;
+        bindings::clock_gettime(clock_id, &raw mut time as _).map(|| warn!("clock_gettime"))?;
         Ok(time)
     }
 }
@@ -226,17 +233,17 @@ pub fn clock_gettime(clock_id: clockid_t) -> Result<Time, ()> {
 pub fn fstat(fd: c_int) -> Result<bindings::stat, ()> {
     unsafe {
         let mut stat = mem::zeroed();
-        bindings::fstat(fd, &raw mut stat).map_minus(|| errprint!("fstat"))?;
+        bindings::fstat(fd, &raw mut stat).map(|| perror!("fstat"))?;
         Ok(stat)
     }
 }
 
 pub fn fchown(fd: c_int, owner: uid_t, group: gid_t) -> Result<(), io::Error> {
-    unsafe { libc::fchown(fd, owner, group).mapx(|_| io::Error::last_os_error()) }
+    unsafe { libc::fchown(fd, owner, group).map(|| io::Error::last_os_error()) }
 }
 
 pub fn futimens(fd: c_int, times: &[Time; 2]) -> Result<(), ()> {
-    unsafe { bindings::futimens(fd, times.as_ptr() as _).map(|| errprint!("set futimens")) }
+    unsafe { bindings::futimens(fd, times.as_ptr() as _).map(|| perror!("set futimens")) }
 }
 
 fn getpwnam(name: &CStr) -> Option<libc::passwd> {
@@ -266,13 +273,8 @@ pub fn pam_start(
     pamh: &mut *mut pam_handle_t,
 ) -> Result<(), ()> {
     unsafe {
-        bindings::pam_start(service.as_ptr(), user.as_ptr(), pam_conv, pamh).map(|| {
-            errprint!(
-                "pam_start(\"{}\", \"{}\", ?, ?): failed",
-                service.to_string_lossy(),
-                user.to_string_lossy()
-            )
-        })
+        bindings::pam_start(service.as_ptr(), user.as_ptr(), pam_conv, pamh)
+            .map_pam(|| errprint!("pam_start({:?}, {:?}, ?, ?): failed", service, user))
     }
 }
 
@@ -288,21 +290,22 @@ pub fn pam_set_item<'a>(
 }
 
 pub fn pam_authenticate(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), ()> {
-    unsafe { bindings::pam_authenticate(pamh, flags).mapx(|_| ()) }
+    unsafe { bindings::pam_authenticate(pamh, flags).map_pam(|| ()) }
 }
 
 pub fn pam_acct_mgmt(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), c_int> {
-    unsafe { bindings::pam_acct_mgmt(pamh, flags).map_direct() }
+    unsafe { bindings::pam_acct_mgmt(pamh, flags).map_pam_direct() }
 }
 
 pub fn pam_chauthtok(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), c_int> {
-    unsafe { bindings::pam_chauthtok(pamh, flags).map_direct() }
+    unsafe { bindings::pam_chauthtok(pamh, flags).map_pam_direct() }
 }
 
 pub fn pam_close_session(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), ()> {
     unsafe {
         bindings::pam_close_session(pamh, flags)
-            .mapx_pam(pamh, |str| errprint!("pam_close_session: {str}",))
+            .map_to_pam_str(pamh)
+            .map_err(|e| errprint!("pam_close_session: {:?}", e))
     }
 }
 
@@ -451,84 +454,49 @@ pub fn perror(str: &CStr) {
     }
 }
 
-#[macro_export]
-macro_rules! perror {
-    ($($arg:tt)*) => {
-        let args = $crate::c_format_args!($($arg)*);
-        let s = $crate::c_format!("{}: {}", $crate::NAME, args);
-        $crate::c::perror(&s);
-    };
-}
-
 trait MapErrNo {
-    fn map<F>(self, f: F) -> Result<(), ()>
+    fn map<F, T>(self, f: F) -> Result<(), T>
     where
-        F: FnOnce();
-    fn map_minus<F>(self, f: F) -> Result<(), ()>
+        F: FnOnce() -> T;
+    fn map_pam<F, T>(self, f: F) -> Result<(), T>
     where
-        F: FnOnce();
-    fn mapx<F, T>(self, f: F) -> Result<(), T>
-    where
-        F: FnOnce(c_int) -> T;
-    fn mapx_pam<'a, F>(self, pamh: &pam_handle_t, f: F) -> Result<(), ()>
-    where
-        F: FnOnce(Cow<'a, str>);
+        F: FnOnce() -> T;
     fn map_to_pam_str(self, pamh: &pam_handle_t) -> Result<(), &CStr>;
-    fn map_direct(self) -> Result<(), Self>
+    fn map_pam_direct(self) -> Result<(), Self>
     where
         Self: Sized;
 }
 
 impl MapErrNo for c_int {
-    // 0 means success
-    fn map<F>(self, f: F) -> Result<(), ()>
-    where
-        F: FnOnce(),
-    {
-        if self == 0 {
-            Ok(())
-        } else {
-            f();
-            perror(c"");
-            Err(())
-        }
-    }
     // -1 means failure
-    fn map_minus<F>(self, f: F) -> Result<(), ()>
+    fn map<F, T>(self, f: F) -> Result<(), T>
     where
-        F: FnOnce(),
+        F: FnOnce() -> T,
     {
-        if self == -1 {
-            f();
-            perror(c"");
-            Err(())
-        } else {
-            Ok(())
-        }
+        if self == -1 { Err(f()) } else { Ok(()) }
     }
-    fn mapx<F, T>(self, f: F) -> Result<(), T>
+
+    fn map_pam<F, T>(self, f: F) -> Result<(), T>
     where
-        F: FnOnce(c_int) -> T,
+        F: FnOnce() -> T,
     {
-        if self == 0 { Ok(()) } else { Err(f(self)) }
-    }
-    fn map_direct(self) -> Result<(), Self> {
-        if self == 0 { Ok(()) } else { Err(self) }
-    }
-    fn mapx_pam<'a, F>(self, pamh: &pam_handle_t, f: F) -> Result<(), ()>
-    where
-        F: FnOnce(Cow<'a, str>),
-    {
-        if self == 0 {
+        if self == bindings::PAM_SUCCESS as i32 {
             Ok(())
         } else {
-            let err_str = unsafe { CStr::from_ptr(bindings::pam_strerror(pamh, self)) };
-            f(err_str.to_string_lossy());
-            Err(())
+            Err(f())
         }
     }
+
+    fn map_pam_direct(self) -> Result<(), Self> {
+        if self == bindings::PAM_SUCCESS as i32 {
+            Ok(())
+        } else {
+            Err(self)
+        }
+    }
+
     fn map_to_pam_str(self, pamh: &pam_handle_t) -> Result<(), &CStr> {
-        if self == 0 {
+        if self == bindings::PAM_SUCCESS as i32 {
             Ok(())
         } else {
             Err(pam_strerror(pamh, self))
