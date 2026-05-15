@@ -1,7 +1,11 @@
 use objc2::runtime::Bool;
 use objc2_foundation::ns_string;
 use objc2_local_authentication::{LAContext, LAPolicy};
-use std::{ffi::CStr, rc::Rc, sync::atomic::AtomicBool, thread};
+use std::{
+    ffi::CStr,
+    sync::{Arc, atomic::AtomicBool},
+    thread,
+};
 
 use crate::{errx, insults, pam};
 
@@ -28,8 +32,8 @@ fn auth_by_local_authentication() -> bool {
     let policy = LAPolicy::DeviceOwnerAuthenticationWithBiometricsOrCompanion;
     let context = unsafe { LAContext::new() };
     if unsafe { context.canEvaluatePolicy_error(policy).is_ok() } {
-        let successful = Rc::new(AtomicBool::new(false));
-        let finished = Rc::new(AtomicBool::new(false));
+        let successful = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
         let mark = thread::current();
         let finished_clone = finished.clone();
         let successful_clone = successful.clone();
