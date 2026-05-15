@@ -1,15 +1,8 @@
-use objc2::runtime::Bool;
-use objc2_foundation::ns_string;
-use objc2_local_authentication::{LAContext, LAPolicy};
-use std::{
-    ffi::CStr,
-    sync::{Arc, atomic::AtomicBool},
-    thread,
-};
-
 use crate::{errx, insults, pam};
+use std::ffi::CStr;
 
 pub fn auth(target_user: &CStr, myname: &CStr, insult: bool) -> Result<(), ()> {
+    #[cfg(feature = "apple-auth")]
     if auth_by_local_authentication() {
         return Ok(());
     }
@@ -28,7 +21,15 @@ pub fn auth(target_user: &CStr, myname: &CStr, insult: bool) -> Result<(), ()> {
     errx!("Authentication failed");
 }
 
+#[cfg(feature = "apple-auth")]
 fn auth_by_local_authentication() -> bool {
+    use objc2::runtime::Bool;
+    use objc2_foundation::ns_string;
+    use objc2_local_authentication::{LAContext, LAPolicy};
+    use std::{
+        sync::{Arc, atomic::AtomicBool},
+        thread,
+    };
     let policy = LAPolicy::DeviceOwnerAuthenticationWithBiometricsOrCompanion;
     let context = unsafe { LAContext::new() };
     if unsafe { context.canEvaluatePolicy_error(policy).is_ok() } {

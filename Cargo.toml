@@ -5,20 +5,22 @@ edition = "2024"
 
 [dependencies]
 libc = "0.2.183"
-# apple local authentication
-block2 = { version = "0.6.2", default-features = false, features = ["alloc"] }
-objc2 = { version = "0.6.4", default-features = false }
-objc2-foundation = { version = "0.3.2", default-features = false }
-objc2-local-authentication = { version = "0.3.2", default-features = false, features = ["LAContext", "block2"] }
 # clear password in memory
 zeroize = { version = "1.8.2", features = ["std"] }
+
+# apple local authentication (optional)
+block2 = { version = "0.6.2", default-features = false, features = ["alloc"], optional = true }
+objc2 = { version = "0.6.4", default-features = false, optional = true }
+objc2-foundation = { version = "0.3.2", default-features = false, optional = true }
+objc2-local-authentication = { version = "0.3.2", default-features = false, features = ["LAContext", "block2"], optional = true }
 
 [profile.release]
 strip = true
 panic = "abort"
 
-[build-dependencies]
-bindgen = "0.71.0"
+# [build-dependencies]
+# bindgen = "0.71.0"
 
 [features]
 nightly = []
+apple-auth = ["block2", "objc2", "objc2-foundation", "objc2-local-authentication"]
