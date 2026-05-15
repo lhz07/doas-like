@@ -1,8 +1,7 @@
-use clap::Parser;
 use doas::{
     CNAME, CONF_PATH,
     c::{self},
-    command::CliArgs,
+    command::CmdArgs,
     config::{Config, check_config, permit},
     errx, syslog, timestamp, verify, warnx,
 };
@@ -22,7 +21,7 @@ fn inner_main() -> Result<(), ()> {
     // no need to close fds, because std::process::Command will do it
 
     // parse args
-    let args = CliArgs::parse();
+    let args = CmdArgs::parse()?;
 
     if args.clear {
         return timestamp::clear();
@@ -48,7 +47,7 @@ fn inner_main() -> Result<(), ()> {
     };
 
     if let Some(path) = args.config {
-        return check_config(&path, real_uid, &groups, target_uid, &argvs);
+        return check_config(path.as_ref(), real_uid, &groups, target_uid, &argvs);
     }
 
     let cmdline = argvs.join(" ".as_ref());
@@ -60,7 +59,7 @@ fn inner_main() -> Result<(), ()> {
         errx!("not installed setuid");
     }
 
-    let config = match Config::parse(CONF_PATH, true) {
+    let config = match Config::parse(CONF_PATH.as_ref(), true) {
         Ok(c) => c,
         Err(e) => errx!("config error: {e}"),
     };
@@ -124,6 +123,9 @@ fn inner_main() -> Result<(), ()> {
         .env_clear()
         .envs(envs)
         .exec();
+    if err.kind() == std::io::ErrorKind::NotFound {
+        errx!("{:?}: command not found", cmd);
+    }
     errx!("exec failed: {err}");
 }
 

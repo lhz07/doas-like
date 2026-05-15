@@ -9,6 +9,7 @@ use std::{
         ffi::OsStrExt,
         fs::{MetadataExt, PermissionsExt},
     },
+    path::Path,
     sync::LazyLock,
     time::Duration,
 };
@@ -21,16 +22,18 @@ use crate::{
 
 #[derive(Debug)]
 pub enum ConfigError<'a> {
-    IO(io::Error, &'a str),
-    Permission(&'static str, &'a str),
+    IO(io::Error, &'a Path),
+    Permission(&'static str, &'a Path),
     Syntax(Cow<'static, str>, usize),
 }
 
 impl<'a> fmt::Display for ConfigError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IO(e, path) => writeln!(f, "{e}, file path: {path}")?,
-            Self::Permission(e, path) => writeln!(f, "permission: {e}, file path: {path}")?,
+            Self::IO(e, path) => writeln!(f, "{e}, file path: {}", path.display())?,
+            Self::Permission(e, path) => {
+                writeln!(f, "permission: {e}, file path: {}", path.display())?
+            }
             Self::Syntax(e, line) => writeln!(f, "syntax: line {line}: {e}")?,
         }
         Ok(())
@@ -402,7 +405,7 @@ fn test_parse() {
         if !file.file_name().to_string_lossy().starts_with("test") {
             continue;
         }
-        match Config::parse(file.path().to_string_lossy().as_ref(), false) {
+        match Config::parse(&file.path(), false) {
             Ok(rules) => println!(
                 "file name: {}, rules: {:?}\n",
                 file.file_name().display(),
@@ -419,7 +422,7 @@ fn check_uid(uid: uid_t, desired: &str) -> Result<(), ()> {
 }
 
 impl Config {
-    pub fn parse(path: &str, check_perm: bool) -> Result<Vec<Config>, ConfigError<'_>> {
+    pub fn parse<'a>(path: &'a Path, check_perm: bool) -> Result<Vec<Config>, ConfigError<'a>> {
         let mut file = fs::File::open(path).map_err(|e| ConfigError::IO(e, path))?;
         if check_perm {
             // check file permission
@@ -547,7 +550,7 @@ pub fn permit(
 }
 
 pub fn check_config(
-    path: &str,
+    path: &Path,
     uid: uid_t,
     groups: &[gid_t],
     target: uid_t,

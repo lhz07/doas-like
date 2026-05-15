@@ -10,8 +10,6 @@ block2 = { version = "0.6.2", default-features = false, features = ["alloc"] }
 objc2 = { version = "0.6.4", default-features = false }
 objc2-foundation = { version = "0.3.2", default-features = false }
 objc2-local-authentication = { version = "0.3.2", default-features = false, features = ["LAContext", "block2"] }
-# cli command parse
-clap = { version = "4.6.0", features = ["derive"] }
 # choose a random insult
 rand = "0.10.0"
 # clear password in memory
