@@ -1,3 +1,44 @@
+//! Timestamp security design
+//! =========================
+//!
+//! Each persist timestamp file is bound to a unique ppid/session/tty/start_time/user
+//! tuple and is only readable by root (the doas process is setuid root, so it can
+//! access /var/run/doas/ which is mode 0700 root). The file itself is owned
+//! by root:gid of the calling user and has mode 0000, preventing access by
+//! unprivileged users, including the owner.
+//!
+//! Expiry is enforced with two independent clocks stored as file timestamps:
+//! - atime (CLOCK_MONOTONIC_RAW): immune to wall-clock adjustments
+//! - mtime (CLOCK_REALTIME): survives reboot (monotonic clock resets to 0)
+//!
+//! During check():
+//!  1. We verify that the file is still a regular file with the correct
+//!     ownership and permissions. Since the timestamp directory is root-owned
+//!     and mode 0700, unprivileged users cannot replace or modify the file.
+//!  2. We reject the timestamp if either clock has already expired.
+//!  3. We reject the timestamp if either expiry time is more than <timeout>
+//!     into the future from now. This "too far in the future" check defends
+//!     against attempts to reuse a timestamp across reboots when the
+//!     monotonic clock has wrapped to a smaller value.
+//!
+//! ## Why the dual-clock + future check makes reboot attacks impractical:
+//!
+//! After a reboot the monotonic clock starts at 0, so a persisted expiry
+//! value (e.g., M+300) will be much larger than the current boot_time +
+//! timeout (e.g., 0+300) for any M > 0, and the future check will reject
+//! the timestamp immediately. An attacker would have to wait for the
+//! monotonic clock to reach at least M seconds, but the realtime clock
+//! continues ticking during the reboot; thus the total wall-clock time
+//! (reboot downtime + waiting time) must still be less than <timeout>.
+//! This is only possible if the original authentication happened very
+//! shortly after boot (M <= timeout) and the machine is rebooted extremely
+//! fast – a scenario so narrow that it poses no realistic risk on a normal
+//! macOS system (where /var/run is also cleaned on boot anyway).
+//!
+//! No user-space-only mechanism can completely defend against a root
+//! attacker who manipulates the wall clock or filesystem. The design
+//! assumes an adversary without root privileges, which is the standard
+//! threat model for a setuid privilege-escalation tool.
 use crate::bindings::timespec;
 use crate::{c, err, errx, warnx};
 use std::time::Duration;
