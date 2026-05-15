@@ -1,6 +1,6 @@
-use rand::seq::IndexedRandom;
+use crate::c;
 
-static INSULTS: [&str; 48] = [
+static INSULTS: [&str; 58] = [
     "You silly, twisted boy you.",
     "He has fallen in the water!",
     "We'll all be murdered in our beds!",
@@ -49,11 +49,19 @@ static INSULTS: [&str; 48] = [
     "You type like i drive.",
     "Do you think like you type?",
     "Your mind just hasn't been the same since the electro-shock, has it?",
+    "No lollygagging!",
+    "Better luck next time.",
+    "PEBKAC detected.",
+    "That's what happens when you're lazy.",
+    "It is clear that this has not been thought through.",
+    "That's the most ridiculous thing I've heard in the last two or three minutes!",
+    "No sane people allowed here.  Go home.",
+    "I would explain, but I am too drunk.",
+    "You're not allowed to have an opinion.",
+    "Complaint forms are handled in another department.",
 ];
 
 pub fn get_an_insult() -> &'static str {
-    let mut rng = rand::rng();
-    INSULTS
-        .choose(&mut rng)
-        .expect("hard encoded insults is never empty")
+    let i = c::arc4random_uniform(INSULTS.len() as u32);
+    INSULTS[i as usize]
 }

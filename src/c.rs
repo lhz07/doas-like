@@ -85,6 +85,17 @@ pub fn get_all_groups() -> Result<Vec<gid_t>, ()> {
     Ok(groups)
 }
 
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+pub fn arc4random_uniform(len: u32) -> u32 {
+    unsafe { libc::arc4random_uniform(len) }
+}
+
 pub struct Passwd {
     pub pw_name: OwnedRef<CStr>,
     pub pw_passwd: OwnedRef<CStr>,
@@ -230,7 +241,7 @@ pub fn fstat(fd: c_int) -> Result<bindings::stat, ()> {
 }
 
 pub fn fchown(fd: c_int, owner: uid_t, group: gid_t) -> Result<(), io::Error> {
-    unsafe { libc::fchown(fd, owner, group).map(|| io::Error::last_os_error()) }
+    unsafe { libc::fchown(fd, owner, group).map(io::Error::last_os_error) }
 }
 
 pub fn futimens(fd: c_int, times: &[Time; 2]) -> Result<(), ()> {

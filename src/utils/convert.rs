@@ -32,6 +32,7 @@ impl<'a> FmtWriter<'a> {
         }
     }
 
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.len
     }
