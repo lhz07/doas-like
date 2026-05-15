@@ -2,10 +2,10 @@ use crate::{
     SAFE_PATH,
     bindings::{self, pam_handle_t, proc_bsdinfo},
     config::{Config, Env, Val},
-    err, errprint, errx,
+    err, errx,
     timestamp::Time,
     utils::selfref::{OwnedRef, SelfRef},
-    warn,
+    warn, warnx,
 };
 use libc::{c_char, c_int, clockid_t, gid_t, pid_t, uid_t};
 use std::{
@@ -15,15 +15,6 @@ use std::{
     io, mem,
     os::unix::ffi::OsStrExt,
 };
-
-#[macro_export]
-macro_rules! perror {
-    ($($arg:tt)*) => {{
-        let args = $crate::c_format_args!($($arg)*);
-        let s = $crate::c_format!("{}: {}", $crate::NAME, args);
-        $crate::c::perror(&s);
-    }};
-}
 
 // very simple bindings -------------------------------------------
 
@@ -54,19 +45,19 @@ pub fn setprogname(name: &CStr) {
 }
 
 pub fn setuid(uid: uid_t) -> Result<(), ()> {
-    unsafe { libc::setuid(uid).map(|| perror!("setuid")) }
+    unsafe { libc::setuid(uid).map(|| warn!("setuid")) }
 }
 
 pub fn seteuid(uid: uid_t) -> Result<(), ()> {
-    unsafe { libc::seteuid(uid).map(|| perror!("seteuid")) }
+    unsafe { libc::seteuid(uid).map(|| warn!("seteuid")) }
 }
 
 pub fn setreuid(ruid: uid_t, euid: uid_t) -> Result<(), ()> {
-    unsafe { libc::setreuid(ruid, euid).map(|| perror!("setreuid")) }
+    unsafe { libc::setreuid(ruid, euid).map(|| warn!("setreuid")) }
 }
 
 pub fn setregid(rgid: uid_t, egid: uid_t) -> Result<(), ()> {
-    unsafe { libc::setregid(rgid, egid).map(|| perror!("setregid")) }
+    unsafe { libc::setregid(rgid, egid).map(|| warn!("setregid")) }
 }
 
 pub fn getgroups() -> Result<Vec<gid_t>, ()> {
@@ -145,7 +136,7 @@ pub fn getpwuid(uid: uid_t) -> Result<SelfRef<Passwd, Vec<c_char>>, ()> {
             let new_size = buf
                 .len()
                 .checked_mul(2)
-                .ok_or_else(|| errprint!("getpwuid: buf size overflow"))?;
+                .ok_or_else(|| warnx!("getpwuid: buf size overflow"))?;
             buf.resize(new_size, 0);
         } else {
             err!("getpwuid");
@@ -165,7 +156,7 @@ pub fn getpwuid(uid: uid_t) -> Result<SelfRef<Passwd, Vec<c_char>>, ()> {
 }
 
 pub fn initgroups(user: &CStr, basegroup: c_int) -> Result<(), ()> {
-    unsafe { libc::initgroups(user.as_ptr(), basegroup).map(|| perror!("initgroups")) }
+    unsafe { libc::initgroups(user.as_ptr(), basegroup).map(|| warn!("initgroups")) }
 }
 
 pub fn getsid(pid: pid_t) -> Result<pid_t, ()> {
@@ -233,7 +224,7 @@ pub fn clock_gettime(clock_id: clockid_t) -> Result<Time, ()> {
 pub fn fstat(fd: c_int) -> Result<bindings::stat, ()> {
     unsafe {
         let mut stat = mem::zeroed();
-        bindings::fstat(fd, &raw mut stat).map(|| perror!("fstat"))?;
+        bindings::fstat(fd, &raw mut stat).map(|| warn!("fstat"))?;
         Ok(stat)
     }
 }
@@ -243,7 +234,7 @@ pub fn fchown(fd: c_int, owner: uid_t, group: gid_t) -> Result<(), io::Error> {
 }
 
 pub fn futimens(fd: c_int, times: &[Time; 2]) -> Result<(), ()> {
-    unsafe { bindings::futimens(fd, times.as_ptr() as _).map(|| perror!("set futimens")) }
+    unsafe { bindings::futimens(fd, times.as_ptr() as _).map(|| warn!("set futimens")) }
 }
 
 fn getpwnam(name: &CStr) -> Option<libc::passwd> {
@@ -274,7 +265,7 @@ pub fn pam_start(
 ) -> Result<(), ()> {
     unsafe {
         bindings::pam_start(service.as_ptr(), user.as_ptr(), pam_conv, pamh)
-            .map_pam(|| errprint!("pam_start({:?}, {:?}, ?, ?): failed", service, user))
+            .map_pam(|| warnx!("pam_start({:?}, {:?}, ?, ?): failed", service, user))
     }
 }
 
@@ -305,7 +296,7 @@ pub fn pam_close_session(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), ()
     unsafe {
         bindings::pam_close_session(pamh, flags)
             .map_to_pam_str(pamh)
-            .map_err(|e| errprint!("pam_close_session: {:?}", e))
+            .map_err(|e| warnx!("pam_close_session: {:?}", e))
     }
 }
 

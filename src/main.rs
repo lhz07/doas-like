@@ -4,7 +4,7 @@ use doas::{
     c::{self},
     command::CliArgs,
     config::{Config, check_config, permit},
-    errprint, errx, syslog, timestamp, verify,
+    errx, syslog, timestamp, verify, warnx,
 };
 use libc::{LOG_AUTHPRIV, LOG_INFO, LOG_NOTICE};
 use std::{
@@ -29,7 +29,7 @@ fn inner_main() -> Result<(), ()> {
     }
 
     let target_uid = match args.user {
-        Some(uid) => c::parse_uid(&uid).inspect_err(|_| errprint!("unknown user"))?,
+        Some(uid) => c::parse_uid(&uid).inspect_err(|_| warnx!("unknown user"))?,
         None => 0,
     };
     let mypw = c::getpwuid(real_uid)?;

@@ -23,25 +23,9 @@ pub const CONF_PATH: &str = "/etc/doas.conf";
 pub const SAFE_PATH: &str = "/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin";
 
 #[macro_export]
-macro_rules! errx {
-    ($($arg:tt)*) => {{
-        eprintln!("{}: {}", $crate::NAME, format_args!($($arg)*));
-        return Err(());
-    }};
-}
-
-#[macro_export]
-macro_rules! err {
-    ($($arg:tt)*) => {{
-        $crate::perror!($($arg)*);
-        return Err(());
-    }};
-}
-
-#[macro_export]
 macro_rules! warnx {
     ($($arg:tt)*) => {{
-        eprintln!("{} warning: {}", $crate::NAME, format_args!($($arg)*));
+        eprintln!("{}: {}", $crate::NAME, format_args!($($arg)*));
     }};
 }
 
@@ -49,13 +33,23 @@ macro_rules! warnx {
 macro_rules! warn {
     ($($arg:tt)*) => {{
         let args = $crate::c_format_args!($($arg)*);
-        $crate::perror!("warning: {}", args);
+        let s = $crate::c_format!("{}: {}", $crate::NAME, args);
+        $crate::c::perror(&s);
     }};
 }
 
 #[macro_export]
-macro_rules! errprint {
+macro_rules! errx {
     ($($arg:tt)*) => {{
-        eprintln!("{}: {}", $crate::NAME, format_args!($($arg)*));
+        $crate::warnx!($($arg)*);
+        return Err(());
+    }};
+}
+
+#[macro_export]
+macro_rules! err {
+    ($($arg:tt)*) => {{
+        $crate::warn!($($arg)*);
+        return Err(());
     }};
 }
