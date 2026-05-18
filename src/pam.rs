@@ -1,29 +1,25 @@
-use std::{
-    ffi::{CStr, CString},
-    mem::ManuallyDrop,
-    process, ptr,
-};
-
-use libc::{LOG_AUTHPRIV, LOG_NOTICE, c_char, c_int, c_void};
-use zeroize::Zeroizing;
-
 use crate::{
     bindings::{self, pam_handle, pam_message, pam_response},
     c, syslog, warnx,
 };
+use libc::{LOG_AUTHPRIV, LOG_NOTICE, c_char, c_int, c_void};
+use std::{
+    ffi::CStr,
+    process,
+    ptr::{self, NonNull},
+};
+use zeroize::Zeroize;
 
-unsafe fn pam_prompt(msg: *const c_char, echo_on: bool) -> Result<CString, u32> {
+unsafe fn pam_prompt(msg: *const c_char, echo_on: bool) -> Result<NonNull<c_char>, u32> {
     use bindings::{PAM_CONV_ERR, PAM_MAX_RESP_SIZE, RPP_ECHO_OFF, RPP_ECHO_ON, RPP_REQUIRE_TTY};
     let flags = RPP_REQUIRE_TTY | if echo_on { RPP_ECHO_ON } else { RPP_ECHO_OFF };
     let mut buf = [0; PAM_MAX_RESP_SIZE as usize];
     let pass = unsafe {
         let pass = bindings::readpassphrase(msg, buf.as_mut_ptr(), size_of_val(&buf), flags as i32);
-        if pass.is_null() {
-            return Err(PAM_CONV_ERR);
-        }
-        CStr::from_ptr(pass).to_owned()
+        let pass = NonNull::new(pass).ok_or(PAM_CONV_ERR)?;
+        c::strdup(pass)
     };
-    Zeroizing::new(buf);
+    buf.zeroize();
     Ok(pass)
 }
 
@@ -33,9 +29,9 @@ unsafe extern "C" fn pamconv(
     rsps: *mut *mut pam_response,
     _: *mut c_void,
 ) -> c_int {
-    let mut response = ZeroDrop::new(Vec::with_capacity(nmsgs as usize));
+    let mut response = PamResp::new(nmsgs as usize);
     let msgs = unsafe { std::slice::from_raw_parts(msgs, nmsgs as usize) };
-    for msg in msgs {
+    for (i, msg) in msgs.iter().enumerate() {
         let msg = unsafe { &**msg };
         match msg.msg_style as u32 {
             bindings::PAM_PROMPT_ECHO_OFF | bindings::PAM_PROMPT_ECHO_ON => {
@@ -49,10 +45,10 @@ unsafe extern "C" fn pamconv(
                     Err(e) => return e as i32,
                 };
                 let rsp = pam_response {
-                    resp: pass.into_raw(),
+                    resp: pass.as_ptr(),
                     resp_retcode: 0,
                 };
-                response.push(rsp);
+                response[i] = rsp;
             }
             bindings::PAM_ERROR_MSG | bindings::PAM_TEXT_INFO => {
                 let msg = unsafe { CStr::from_ptr(msg.msg) };
@@ -64,48 +60,59 @@ unsafe extern "C" fn pamconv(
             }
         }
     }
-    let resp = response.into_inner().leak();
+    let resp = response.into_inner();
     unsafe {
-        *rsps = resp.as_mut_ptr();
+        *rsps = resp;
     }
     bindings::PAM_SUCCESS as i32
 }
 
-struct ZeroDrop {
-    vec: ManuallyDrop<Vec<pam_response>>,
+struct PamResp {
+    slice: *mut [pam_response],
 }
 
-impl ZeroDrop {
-    fn new(vec: Vec<pam_response>) -> Self {
-        Self {
-            vec: ManuallyDrop::new(vec),
-        }
+impl PamResp {
+    fn new(nmsgs: usize) -> Self {
+        let data = c::calloc(nmsgs, size_of::<pam_response>());
+        let slice =
+            unsafe { core::slice::from_raw_parts_mut(data.as_ptr() as *mut pam_response, nmsgs) };
+        Self { slice }
     }
-    fn into_inner(self) -> Vec<pam_response> {
-        let mut new_guard = ManuallyDrop::new(self);
-        unsafe { ManuallyDrop::take(&mut new_guard.vec) }
+    fn into_inner(self) -> *mut pam_response {
+        let slice = self.slice;
+        std::mem::forget(self);
+        slice as *mut _
     }
 }
 
-impl std::ops::Deref for ZeroDrop {
-    type Target = Vec<pam_response>;
+impl std::ops::Deref for PamResp {
+    type Target = [pam_response];
     fn deref(&self) -> &Self::Target {
-        &self.vec
+        unsafe { &*self.slice }
     }
 }
 
-impl std::ops::DerefMut for ZeroDrop {
+impl std::ops::DerefMut for PamResp {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.vec
+        unsafe { &mut *self.slice }
     }
 }
 
-impl Drop for ZeroDrop {
+impl Drop for PamResp {
     fn drop(&mut self) {
-        let vec = unsafe { ManuallyDrop::take(&mut self.vec) };
-        for res in vec {
-            let cstr = unsafe { CString::from_raw(res.resp) };
-            Zeroizing::new(cstr);
+        let slice = &mut **self;
+        for res in slice {
+            if res.resp.is_null() {
+                continue;
+            }
+            let cstr = unsafe { core::slice::from_raw_parts_mut(res.resp, libc::strlen(res.resp)) };
+            cstr.zeroize();
+            unsafe {
+                libc::free(res.resp as *mut _);
+            }
+        }
+        unsafe {
+            libc::free(self.slice as *mut _);
         }
     }
 }

@@ -56,6 +56,15 @@ pub trait WriteToBytes<'a> {
     fn get_writer(&'a self) -> FmtWriter<'a>;
 }
 
+impl<'a> WriteToBytes<'a> for usize {
+    fn get_writer(&'a self) -> FmtWriter<'a> {
+        let s = self.to_string();
+        let bytes = s.as_bytes();
+        let data = bytes.as_ptr() as *const ();
+        unsafe { FmtWriter::new(data, bytes.len(), general_write, &()) }
+    }
+}
+
 impl<'a> WriteToBytes<'a> for CStr {
     fn get_writer(&'a self) -> FmtWriter<'a> {
         let data = self.as_ptr() as *const ();

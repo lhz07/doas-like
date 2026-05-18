@@ -11,9 +11,10 @@ use libc::{c_char, c_int, clockid_t, gid_t, pid_t, uid_t};
 use std::{
     collections::HashMap,
     env,
-    ffi::{CStr, CString, OsStr, OsString},
+    ffi::{CStr, CString, OsStr, OsString, c_void},
     io, mem,
     os::unix::ffi::OsStrExt,
+    ptr::NonNull,
 };
 
 // very simple bindings -------------------------------------------
@@ -58,6 +59,33 @@ pub fn setreuid(ruid: uid_t, euid: uid_t) -> Result<(), ()> {
 
 pub fn setregid(rgid: uid_t, egid: uid_t) -> Result<(), ()> {
     unsafe { libc::setregid(rgid, egid).map(|| warn!("setregid")) }
+}
+
+// SAFETY: `str` must be a valid pointer.
+pub unsafe fn strdup(str: NonNull<c_char>) -> NonNull<c_char> {
+    let str = unsafe { libc::strdup(str.as_ptr()) };
+    let str = NonNull::new(str);
+    match str {
+        Some(str) => str,
+        None => {
+            warn!("could not allocate str");
+            std::process::exit(1);
+        }
+    }
+}
+
+pub fn calloc(n: usize, size: usize) -> NonNull<c_void> {
+    unsafe {
+        let data = libc::calloc(n, size);
+        let data = NonNull::new(data);
+        match data {
+            Some(data) => data,
+            None => {
+                warn!("could not allocate memory for n: {}, size: {}", n, size);
+                std::process::exit(1);
+            }
+        }
+    }
 }
 
 pub fn getgroups() -> Result<Vec<gid_t>, ()> {

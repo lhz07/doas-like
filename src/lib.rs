@@ -1,10 +1,7 @@
 #![allow(clippy::result_unit_err)]
 #![cfg_attr(feature = "nightly", feature(gen_blocks))]
 
-#[global_allocator]
-static GLOBAL: System = System;
-
-use std::{alloc::System, ffi::CStr};
+use std::ffi::CStr;
 
 pub mod bindings;
 pub mod c;
