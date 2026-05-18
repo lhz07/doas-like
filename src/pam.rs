@@ -142,7 +142,15 @@ pub fn pam_auth(target_user: &CStr, myname: &CStr, pwfeedback: bool) -> Result<(
     let hostname = c::gethostname()
         .map(|s| Cow::Owned(s))
         .unwrap_or(c"?".into());
-    let doas_prompt = c_format!("doas ({}@{}) password: ", myname, hostname.as_ref());
+    let name_bytes = myname.to_bytes();
+    let hostname_bytes = hostname.to_bytes();
+    let name_max = name_bytes.len().min(32);
+    let hostname_max = hostname_bytes.len().min(32);
+    let doas_prompt = c_format!(
+        "doas ({}@{}) password: ",
+        name_bytes[..name_max],
+        hostname_bytes[..hostname_max]
+    );
     let mut appdata = PamData {
         pwfeedback,
         doas_prompt,

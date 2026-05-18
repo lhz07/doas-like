@@ -94,6 +94,13 @@ impl<'a> WriteToBytes<'a> for PathBuf {
     }
 }
 
+impl<'a> WriteToBytes<'a> for [u8] {
+    fn get_writer(&'a self) -> FmtWriter<'a> {
+        let data = self.as_ptr() as *const ();
+        unsafe { FmtWriter::new(data, self.len(), general_write, &()) }
+    }
+}
+
 impl<'a, const N: usize, const S: usize> WriteToBytes<'a> for CArgs<'a, N, S> {
     fn get_writer(&'a self) -> FmtWriter<'a> {
         unsafe fn write<const N: usize, const S: usize>(
