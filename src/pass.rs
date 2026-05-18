@@ -2,8 +2,8 @@ use crate::{c, utils::array::Array};
 use std::{
     ffi::{CStr, c_char},
     fs,
-    io::{self, Read, Write},
-    os::fd::AsFd,
+    io::{self, Read as _, Write as _},
+    os::fd::AsFd as _,
 };
 
 pub fn read_passwd<const N: usize>(
@@ -22,13 +22,11 @@ pub fn read_passwd<const N: usize>(
                 drop(term);
                 std::process::exit(1);
             }
-            BACKSPACE | DEL => {
-                if !term.buf.is_empty() {
-                    if pwfeedback {
-                        term.write(b"\x08 \x08")?;
-                    }
-                    term.buf.pop();
+            BACKSPACE | DEL if !term.buf.is_empty() => {
+                if pwfeedback {
+                    term.write(b"\x08 \x08")?;
                 }
+                term.buf.pop();
             }
             ch if !ch.is_ascii_control() => {
                 term.buf
@@ -73,7 +71,7 @@ impl<'a, const N: usize> Term<'a, N> {
     fn new(buf: &'a mut Array<N, c_char>, pwfeedback: bool) -> io::Result<Self> {
         let tty = open_tty()?;
         let mut termios = c::get_terminal_attr(tty.as_fd())?;
-        let origin_termios = termios.clone();
+        let origin_termios = termios;
         c::cfmakeraw(&mut termios);
         // termios.c_lflag &= !(libc::ECHO | libc::ICANON);
         c::set_terminal_attr(tty.as_fd(), &termios)?;
@@ -100,7 +98,7 @@ impl<'a, const N: usize> Term<'a, N> {
 
 impl<'a, const N: usize> Drop for Term<'a, N> {
     fn drop(&mut self) {
-        if self.pwfeedback && self.buf.len() > 0 {
+        if self.pwfeedback && !self.buf.is_empty() {
             // clear the feedback
             if self.buf.len() > 1 {
                 let _ = self.write(format!("\x1b[{}D", self.buf.len() - 1).as_bytes());

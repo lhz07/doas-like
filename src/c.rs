@@ -14,7 +14,7 @@ use std::{
     ffi::{CStr, CString, OsStr, OsString, c_void},
     io, mem,
     os::{
-        fd::{AsRawFd, BorrowedFd},
+        fd::{AsRawFd as _, BorrowedFd},
         unix::ffi::OsStrExt as _,
     },
     ptr::NonNull,

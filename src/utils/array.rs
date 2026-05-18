@@ -146,7 +146,7 @@ impl<const N: usize, T> Array<N, T> {
     pub const fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
         unsafe {
             core::slice::from_raw_parts_mut(
-                self.data.as_mut_ptr().add(self.len) as *mut MaybeUninit<T>,
+                self.data.as_mut_ptr().add(self.len),
                 self.capacity() - self.len,
             )
         }
