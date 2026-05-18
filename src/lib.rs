@@ -8,6 +8,7 @@ pub mod command;
 pub mod config;
 pub mod insults;
 pub mod pam;
+pub mod pass;
 pub mod timestamp;
 pub mod tokenizer;
 pub mod utils;

@@ -93,7 +93,12 @@ fn inner_main() -> Result<(), ()> {
         // downgrade to real uid
         c::seteuid(real_uid)?;
         // authenticate user
-        verify::auth(&target_pw.pw_name, &mypw.pw_name, rule.options.insult)?;
+        verify::auth(
+            &target_pw.pw_name,
+            &mypw.pw_name,
+            rule.options.insult,
+            false,
+        )?;
         // upgrade to euid
         c::setreuid(0, 0)?;
     }

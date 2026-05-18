@@ -1,46 +1,67 @@
 use crate::{
     bindings::{self, pam_handle, pam_message, pam_response},
-    c, syslog, warnx,
+    c, c_format,
+    pass::read_passwd,
+    syslog,
+    utils::array::Array,
+    warnx,
 };
 use libc::{LOG_AUTHPRIV, LOG_NOTICE, c_char, c_int, c_void};
 use std::{
-    ffi::CStr,
+    borrow::Cow,
+    ffi::{CStr, CString},
     process,
     ptr::{self, NonNull},
 };
 use zeroize::Zeroize as _;
 
-unsafe fn pam_prompt(msg: *const c_char, echo_on: bool) -> Result<NonNull<c_char>, u32> {
-    use bindings::{PAM_CONV_ERR, PAM_MAX_RESP_SIZE, RPP_ECHO_OFF, RPP_ECHO_ON, RPP_REQUIRE_TTY};
-    let flags = RPP_REQUIRE_TTY | if echo_on { RPP_ECHO_ON } else { RPP_ECHO_OFF };
-    let mut buf = [0; PAM_MAX_RESP_SIZE as usize];
+fn pam_prompt(msg: &CStr, pwfeedback: bool) -> Result<NonNull<c_char>, u32> {
+    use bindings::{PAM_CONV_ERR, PAM_MAX_RESP_SIZE};
+    const N: usize = PAM_MAX_RESP_SIZE as usize + 1;
+    let mut buf = Array::<N, _>::new();
     let pass = unsafe {
-        let pass = bindings::readpassphrase(msg, buf.as_mut_ptr(), size_of_val(&buf), flags as i32);
-        let pass = NonNull::new(pass).ok_or(PAM_CONV_ERR)?;
-        c::strdup(pass)
+        read_passwd(msg, &mut buf, pwfeedback).map_err(|_| PAM_CONV_ERR)?;
+        c::strdup(buf.as_slice().as_ptr())
     };
-    buf.zeroize();
+    buf.as_mut_slice().zeroize();
+    buf.spare_capacity_mut().zeroize();
     Ok(pass)
+}
+
+struct PamData {
+    pwfeedback: bool,
+    doas_prompt: CString,
 }
 
 unsafe extern "C" fn pamconv(
     nmsgs: c_int,
     msgs: *mut *const pam_message,
     rsps: *mut *mut pam_response,
-    _: *mut c_void,
+    data: *mut c_void,
 ) -> c_int {
     let mut response = PamResp::new(nmsgs as usize);
+    let mut doas_prompt = None;
+    let mut pwfeedback = false;
+    unsafe {
+        if !data.is_null() {
+            let data = data as *mut PamData;
+            pwfeedback = (*data).pwfeedback;
+            doas_prompt = Some((*data).doas_prompt.as_c_str());
+        }
+    };
     let msgs = unsafe { std::slice::from_raw_parts(msgs, nmsgs as usize) };
     for (i, msg) in msgs.iter().enumerate() {
         let msg = unsafe { &**msg };
         match msg.msg_style as u32 {
             bindings::PAM_PROMPT_ECHO_OFF | bindings::PAM_PROMPT_ECHO_ON => {
-                let pass = match unsafe {
-                    pam_prompt(
-                        msg.msg,
-                        msg.msg_style == bindings::PAM_PROMPT_ECHO_ON as i32,
-                    )
-                } {
+                let mut prompt = unsafe { CStr::from_ptr(msg.msg) };
+                if prompt == c"Password:"
+                    && let Some(doas_prompt) = doas_prompt
+                {
+                    prompt = doas_prompt;
+                }
+
+                let pass = match pam_prompt(prompt, pwfeedback) {
                     Ok(pass) => pass,
                     Err(e) => return e as i32,
                 };
@@ -117,11 +138,19 @@ impl Drop for PamResp {
     }
 }
 
-pub fn pam_auth(target_user: &CStr, myname: &CStr) -> Result<(), ()> {
+pub fn pam_auth(target_user: &CStr, myname: &CStr, pwfeedback: bool) -> Result<(), ()> {
+    let hostname = c::gethostname()
+        .map(|s| Cow::Owned(s))
+        .unwrap_or(c"?".into());
+    let doas_prompt = c_format!("doas ({}@{}) password: ", myname, hostname.as_ref());
+    let mut appdata = PamData {
+        pwfeedback,
+        doas_prompt,
+    };
     let mut pam_guard = unsafe {
         let conv = bindings::pam_conv {
             conv: Some(pamconv),
-            appdata_ptr: ptr::null_mut(),
+            appdata_ptr: &raw mut appdata as *mut _,
         };
         let mut pamh = ptr::null_mut();
         c::pam_start(c"sudo", myname, &conv, &mut pamh)?;

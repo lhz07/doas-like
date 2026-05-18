@@ -1,14 +1,14 @@
 use crate::{errx, insults, pam};
 use std::ffi::CStr;
 
-pub fn auth(target_user: &CStr, myname: &CStr, insult: bool) -> Result<(), ()> {
+pub fn auth(target_user: &CStr, myname: &CStr, insult: bool, pwfeedback: bool) -> Result<(), ()> {
     #[cfg(feature = "apple-auth")]
     if auth_by_local_authentication() {
         return Ok(());
     }
     // fall back to pam authentication
     for _ in 0..3 {
-        let res = pam::pam_auth(target_user, myname);
+        let res = pam::pam_auth(target_user, myname, pwfeedback);
         if res.is_ok() {
             return res;
         }

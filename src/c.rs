@@ -13,7 +13,10 @@ use std::{
     env,
     ffi::{CStr, CString, OsStr, OsString, c_void},
     io, mem,
-    os::unix::ffi::OsStrExt as _,
+    os::{
+        fd::{AsRawFd, BorrowedFd},
+        unix::ffi::OsStrExt as _,
+    },
     ptr::NonNull,
 };
 
@@ -63,8 +66,8 @@ pub fn setregid(rgid: uid_t, egid: uid_t) -> Result<(), ()> {
 
 /// # Safety
 /// `str` must be a valid pointer.
-pub unsafe fn strdup(str: NonNull<c_char>) -> NonNull<c_char> {
-    let str = unsafe { libc::strdup(str.as_ptr()) };
+pub unsafe fn strdup(str: *const c_char) -> NonNull<c_char> {
+    let str = unsafe { libc::strdup(str) };
     let str = NonNull::new(str);
     match str {
         Some(str) => str,
@@ -104,6 +107,33 @@ pub fn getgroups() -> Result<Vec<gid_t>, ()> {
         let mut vec = Vec::with_capacity(ngroups + 1);
         vec.extend(&groups[..ngroups]);
         Ok(vec)
+    }
+}
+
+pub fn get_terminal_attr(fd: BorrowedFd<'_>) -> io::Result<libc::termios> {
+    unsafe {
+        let mut termios = mem::zeroed();
+        libc::tcgetattr(fd.as_raw_fd(), &mut termios).map(io::Error::last_os_error)?;
+        Ok(termios)
+    }
+}
+
+pub fn set_terminal_attr(fd: BorrowedFd<'_>, termios: &libc::termios) -> io::Result<()> {
+    unsafe { libc::tcsetattr(fd.as_raw_fd(), libc::TCSANOW, termios).map(io::Error::last_os_error) }
+}
+
+pub fn cfmakeraw(termios: &mut libc::termios) {
+    unsafe {
+        libc::cfmakeraw(termios);
+    }
+}
+
+pub fn gethostname() -> io::Result<CString> {
+    let mut buf = [0; libc::_SC_HOST_NAME_MAX as usize + 1];
+    unsafe {
+        libc::gethostname(buf.as_mut_ptr(), size_of_val(&buf)).map(io::Error::last_os_error)?;
+        let s = CStr::from_ptr(buf.as_ptr()).to_owned();
+        Ok(s)
     }
 }
 

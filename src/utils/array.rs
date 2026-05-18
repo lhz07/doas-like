@@ -41,6 +41,19 @@ impl<const N: usize, T> Array<N, T> {
         self.len += 1;
     }
 
+    pub const fn push_checked(&mut self, val: T) -> Result<(), T> {
+        if self.len >= N {
+            return Err(val);
+        }
+        // Safety:
+        // `self.len < N` guarantees the slot is in bounds and uninitialized.
+        unsafe {
+            self.data[self.len].as_mut_ptr().write(val);
+        }
+        self.len += 1;
+        Ok(())
+    }
+
     pub const fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
             None
@@ -130,6 +143,16 @@ impl<const N: usize, T> Array<N, T> {
         }
     }
 
+    pub const fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                self.data.as_mut_ptr().add(self.len) as *mut MaybeUninit<T>,
+                self.capacity() - self.len,
+            )
+        }
+    }
+
+    #[inline]
     pub const fn capacity(&self) -> usize {
         N
     }
