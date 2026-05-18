@@ -47,8 +47,8 @@ use std::{
     fs::{self, File, FileTimes, Permissions},
     io, ops,
     os::{
-        fd::AsRawFd,
-        unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+        fd::AsRawFd as _,
+        unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
     },
     path::{Path, PathBuf},
     time::SystemTime,

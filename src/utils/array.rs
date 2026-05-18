@@ -19,12 +19,6 @@ pub struct Array<const N: usize, T> {
     len: usize,
 }
 
-impl<const N: usize, T> Default for Array<N, T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl<const N: usize, T> Array<N, T> {
     pub const fn new() -> Self {
         Self {
@@ -147,12 +141,11 @@ impl<const N: usize, T> Array<N, T> {
 /// - panics if either bound is out of range
 /// - panics if `start > end`
 pub const fn slice<T>(s: &[T], idx: Range<usize>) -> &[T] {
-    if idx.start > s.len() || idx.end > s.len() {
-        panic!("index out of bounds");
-    }
-    if idx.start > idx.end {
-        panic!("slice start is greater than end");
-    }
+    assert!(
+        !(idx.start > s.len() || idx.end > s.len()),
+        "index out of bounds"
+    );
+    assert!(idx.start <= idx.end, "slice start is greater than end");
     let len = idx.end - idx.start;
 
     // Safety: bounds are validated above

@@ -24,3 +24,27 @@ panic = "abort"
 [features]
 nightly = []
 apple-auth = ["block2", "objc2", "objc2-foundation", "objc2-local-authentication"]
+
+[lints.clippy]
+assigning_clones = "warn"
+cloned_instead_of_copied = "warn"
+explicit_into_iter_loop = "warn"
+format_push_string = "warn"
+implicit_clone = "warn"
+len_without_is_empty = "allow" 
+result_unit_err = "allow" 
+let_and_return = "allow"
+manual_assert = "warn"
+manual_range_contains = "allow"
+map_unwrap_or = "warn"
+mut_mut = "warn"
+needless_lifetimes = "allow"
+new_without_default = "allow"
+option_map_unit_fn = "allow"
+ptr_offset_by_literal = "warn"
+ref_option = "warn"
+semicolon_if_nothing_returned = "warn"
+stable_sort_primitive = "warn"
+str_to_string = "warn"
+unnecessary_semicolon = "warn"
+unused_trait_names = "warn"

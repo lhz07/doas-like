@@ -1,7 +1,7 @@
 use std::{
     ffi::{CStr, CString, OsString},
     marker::PhantomData,
-    os::unix::ffi::OsStrExt,
+    os::unix::ffi::OsStrExt as _,
     path::PathBuf,
 };
 
@@ -32,7 +32,6 @@ impl<'a> FmtWriter<'a> {
         }
     }
 
-    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.len
     }

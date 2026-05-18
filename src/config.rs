@@ -4,10 +4,10 @@ use std::{
     collections::HashSet,
     ffi::{OsStr, OsString},
     fmt, fs,
-    io::{self, Read},
+    io::{self, Read as _},
     os::unix::{
-        ffi::OsStrExt,
-        fs::{MetadataExt, PermissionsExt},
+        ffi::OsStrExt as _,
+        fs::{MetadataExt as _, PermissionsExt as _},
     },
     path::Path,
     sync::LazyLock,
@@ -16,7 +16,7 @@ use std::{
 
 use crate::{
     c, errx, gen_tokenizer,
-    timestamp::FromStr,
+    timestamp::FromStr as _,
     tokenizer::{State, Tokenizer},
 };
 
@@ -30,13 +30,12 @@ pub enum ConfigError<'a> {
 impl<'a> fmt::Display for ConfigError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IO(e, path) => writeln!(f, "{e}, file path: {}", path.display())?,
+            Self::IO(e, path) => writeln!(f, "{e}, file path: {}", path.display()),
             Self::Permission(e, path) => {
-                writeln!(f, "permission: {e}, file path: {}", path.display())?
+                writeln!(f, "permission: {e}, file path: {}", path.display())
             }
-            Self::Syntax(e, line) => writeln!(f, "syntax: line {line}: {e}")?,
+            Self::Syntax(e, line) => writeln!(f, "syntax: line {line}: {e}"),
         }
-        Ok(())
     }
 }
 
@@ -213,7 +212,7 @@ where
                                     tokens.line(),
                                 ));
                             }
-                            options.envs.push(Env::Remove(env.to_string()));
+                            options.envs.push(Env::Remove(env.to_owned()));
                         }
                         // PKG="/path/to"
                         // PKG=/path"/to"
@@ -257,17 +256,17 @@ where
                                         tokens.line(),
                                     ));
                                 }
-                                Some(("", value)) => Val::FromEnv(value.to_string()),
-                                _ => Val::New(val.to_string()),
+                                Some(("", value)) => Val::FromEnv(value.to_owned()),
+                                _ => Val::New(val.to_owned()),
                             };
                             options.envs.push(Env::Set {
-                                key: key.to_string(),
+                                key: key.to_owned(),
                                 val,
                             });
                         } else if !token.quoted() {
                             options.envs.push(Env::Keep(token.into_string()));
                         } else {
-                            eprintln!("warning: quoted env: \"{}\" is ignored", token.as_str())
+                            eprintln!("warning: quoted env: \"{}\" is ignored", token.as_str());
                         }
                     }
                     return Err(ConfigError::Syntax(
@@ -307,11 +306,11 @@ where
         Some((user, group)) => {
             if !user.is_empty() && !group.is_empty() {
                 Identity::Both {
-                    user: user.to_string(),
-                    group: group.to_string(),
+                    user: user.to_owned(),
+                    group: group.to_owned(),
                 }
             } else if !group.is_empty() {
-                Identity::Group(group.to_string())
+                Identity::Group(group.to_owned())
             } else if !user.is_empty() {
                 Identity::User(identity)
             } else {

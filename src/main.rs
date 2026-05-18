@@ -9,7 +9,7 @@ use libc::{LOG_AUTHPRIV, LOG_INFO, LOG_NOTICE};
 use std::{
     env,
     ffi::OsStr,
-    os::unix::{ffi::OsStrExt, process::CommandExt},
+    os::unix::{ffi::OsStrExt as _, process::CommandExt as _},
     process,
 };
 

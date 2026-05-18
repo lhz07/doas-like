@@ -13,7 +13,7 @@ use std::{
     env,
     ffi::{CStr, CString, OsStr, OsString, c_void},
     io, mem,
-    os::unix::ffi::OsStrExt,
+    os::unix::ffi::OsStrExt as _,
     ptr::NonNull,
 };
 
@@ -61,7 +61,8 @@ pub fn setregid(rgid: uid_t, egid: uid_t) -> Result<(), ()> {
     unsafe { libc::setregid(rgid, egid).map(|| warn!("setregid")) }
 }
 
-// SAFETY: `str` must be a valid pointer.
+/// # Safety
+/// `str` must be a valid pointer.
 pub unsafe fn strdup(str: NonNull<c_char>) -> NonNull<c_char> {
     let str = unsafe { libc::strdup(str.as_ptr()) };
     let str = NonNull::new(str);

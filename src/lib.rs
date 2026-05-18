@@ -1,4 +1,3 @@
-#![allow(clippy::result_unit_err)]
 #![cfg_attr(feature = "nightly", feature(gen_blocks))]
 
 use std::ffi::CStr;

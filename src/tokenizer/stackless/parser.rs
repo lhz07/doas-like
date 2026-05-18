@@ -92,7 +92,7 @@ pub async fn tokenizer(co: &Val<State>, content: &str) {
                 match &quote_state {
                     QuoteState::None if quoted => quote_state = QuoteState::Half(token.str.len()),
                     QuoteState::Half(start) if !quoted && token.str.len() > *start => {
-                        quote_state = QuoteState::Full(*start..token.str.len())
+                        quote_state = QuoteState::Full(*start..token.str.len());
                     }
                     _ => (),
                 }

@@ -52,9 +52,7 @@ pub const fn prep_str<const N: usize>(bytes: &[u8], args: usize) -> Array<N, u8>
                 panic!("nul character is not allowed here");
             }
             _ => {
-                if in_brace {
-                    panic!("mismatch '{{'");
-                }
+                assert!(!in_brace, "mismatch '{{'");
                 out.push(ch);
             }
         }
@@ -62,9 +60,7 @@ pub const fn prep_str<const N: usize>(bytes: &[u8], args: usize) -> Array<N, u8>
         i += 1;
     }
 
-    if in_brace {
-        panic!("mismatch '{{'");
-    }
+    assert!(!in_brace, "mismatch '{{'");
 
     assert!(args == arg_count, "mismatch args");
 

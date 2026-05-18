@@ -8,7 +8,7 @@ use std::{
     process,
     ptr::{self, NonNull},
 };
-use zeroize::Zeroize;
+use zeroize::Zeroize as _;
 
 unsafe fn pam_prompt(msg: *const c_char, echo_on: bool) -> Result<NonNull<c_char>, u32> {
     use bindings::{PAM_CONV_ERR, PAM_MAX_RESP_SIZE, RPP_ECHO_OFF, RPP_ECHO_ON, RPP_REQUIRE_TTY};

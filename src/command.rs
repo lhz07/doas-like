@@ -1,7 +1,7 @@
 use crate::warnx;
 use std::{
     ffi::OsString,
-    os::unix::ffi::{OsStrExt, OsStringExt},
+    os::unix::ffi::{OsStrExt as _, OsStringExt as _},
 };
 
 #[derive(Default)]
