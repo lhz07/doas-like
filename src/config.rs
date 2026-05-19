@@ -1,7 +1,6 @@
 use libc::{gid_t, uid_t};
 use std::{
     borrow::Cow,
-    collections::HashSet,
     ffi::{OsStr, OsString},
     fmt, fs,
     io::{self, Read as _},
@@ -10,7 +9,6 @@ use std::{
         fs::{MetadataExt as _, PermissionsExt as _},
     },
     path::Path,
-    sync::LazyLock,
     time::Duration,
 };
 
@@ -63,6 +61,7 @@ pub enum Val {
 #[derive(Debug, Default)]
 pub struct Options {
     pub nopass: bool,
+    pub pwfeedback: bool,
     pub insult: bool,
     pub nolog: bool,
     pub persist: Option<Duration>,
@@ -92,11 +91,6 @@ pub struct Config {
     cmd: Option<Cmd>,
 }
 
-static OPTIONS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
-    ["nopass", "nolog", "persist", "keepenv", "insult", "setenv"]
-        .into_iter()
-        .collect()
-});
 static DEFAULT_TIMEOUT: Duration = Duration::from_mins(5);
 
 fn parser<'a, T>(tokens: &mut Tokenizer<T>) -> Result<Config, ConfigError<'a>>
@@ -114,17 +108,10 @@ where
 
     // optional options
     let mut options = Options::default();
-    let mut available_options = OPTIONS.clone();
     'outer: loop {
         match tokens.peek() {
             Some(token) if !token.quoted() => match token.as_str() {
                 "nopass" => {
-                    if !available_options.remove("nopass") {
-                        return Err(ConfigError::Syntax(
-                            "duplicate \"nopass\"".into(),
-                            tokens.line(),
-                        ));
-                    }
                     options.nopass = true;
                     tokens.next();
                 }
@@ -133,12 +120,6 @@ where
                     tokens.next();
                 }
                 "persist" => {
-                    if !available_options.remove("persist") {
-                        return Err(ConfigError::Syntax(
-                            "duplicate \"persist\"".into(),
-                            tokens.line(),
-                        ));
-                    }
                     tokens.next();
                     if let Some(s) = tokens.peek()
                         && s.is_key("{")
@@ -167,6 +148,10 @@ where
                     } else {
                         options.persist = Some(DEFAULT_TIMEOUT);
                     }
+                }
+                "pwfeedback" => {
+                    options.pwfeedback = true;
+                    tokens.next();
                 }
                 "keepenv" => {
                     options.keepenv = true;

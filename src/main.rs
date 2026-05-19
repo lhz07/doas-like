@@ -97,7 +97,7 @@ fn inner_main() -> Result<(), ()> {
             &target_pw.pw_name,
             &mypw.pw_name,
             rule.options.insult,
-            false,
+            rule.options.pwfeedback,
         )?;
         // upgrade to euid
         c::setreuid(0, 0)?;
