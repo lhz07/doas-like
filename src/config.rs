@@ -557,7 +557,7 @@ impl Config {
             // don't forget to mask out file type bits
             // file type | special | permission
             //    010    |    0    |    644
-            if (meta.permissions().mode() & 0o777) != 0o0644 {
+            if (meta.permissions().mode() & (libc::S_IWGRP | libc::S_IWOTH) as u32) != 0 {
                 return Err(ConfigError::Permission(
                     "config file is writable by group or other",
                     path,
