@@ -15,16 +15,23 @@ pub fn read_passwd<const N: usize>(
     term.write(prompt.to_bytes())?;
     loop {
         match term.read()? {
-            b'\n' | b'\r' => {
+            b'\n' | b'\r' | CTRL_D => {
                 break;
             }
             CTRL_C => {
                 drop(term);
                 std::process::exit(1);
             }
+            CTRL_U if !term.buf.is_empty() => {
+                if term.pwfeedback {
+                    term.write(&CLEAR.repeat(term.buf.len()))?;
+                }
+                term.buf.clear();
+            }
+
             BACKSPACE | DEL if !term.buf.is_empty() => {
                 if pwfeedback {
-                    term.write(b"\x08 \x08")?;
+                    term.write(CLEAR)?;
                 }
                 term.buf.pop();
             }
@@ -48,10 +55,9 @@ pub fn read_passwd<const N: usize>(
 const BACKSPACE: u8 = b'\x08';
 const DEL: u8 = b'\x7F';
 const CTRL_C: u8 = b'\x03';
-// TODO: support these
-// const CTRL_D: u8 = b'\x04';
-// const CTRL_U: u8 = b'\x15';
-// const CTRL_W: u8 = b'\x17';
+const CLEAR: &[u8; 3] = b"\x08 \x08";
+const CTRL_D: u8 = b'\x04';
+const CTRL_U: u8 = b'\x15';
 
 fn open_tty() -> io::Result<fs::File> {
     fs::OpenOptions::new()
@@ -100,10 +106,7 @@ impl<'a, const N: usize> Drop for Term<'a, N> {
     fn drop(&mut self) {
         if self.pwfeedback && !self.buf.is_empty() {
             // clear the feedback
-            if self.buf.len() > 1 {
-                let _ = self.write(format!("\x1b[{}D", self.buf.len() - 1).as_bytes());
-            }
-            let _ = self.write(b"\x1b[K");
+            let _ = self.write(&CLEAR.repeat(self.buf.len()));
         }
         let _ = self.write(b"\r\n");
         let _ = c::set_terminal_attr(self.tty.as_fd(), &self.origin_termios);

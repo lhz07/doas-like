@@ -81,7 +81,7 @@ impl<const N: usize, T> Array<N, T> {
     ///
     /// Once `const Destruct` becomes stable, this should be replaced with:
     /// `ptr::drop_in_place`-based implementation.
-    pub const fn clear(&mut self) -> [Option<T>; N] {
+    pub const fn const_clear(&mut self) -> [Option<T>; N] {
         let mut out = [const { None }; N];
         if self.len == 0 {
             return out;
@@ -104,15 +104,24 @@ impl<const N: usize, T> Array<N, T> {
         out
     }
 
-    /// Drop the Array and its elements.
-    pub fn drop(mut self) {
+    pub fn clear(&mut self) {
         let elems: *mut [T] = self.as_mut_slice();
 
         // SAFETY:
-        // `elems` comes directly from `as_mut_slice` and is therefore valid.
+        // - `elems` comes directly from `as_mut_slice` and is therefore valid.
+        // - Setting `self.len` before calling `drop_in_place` means that,
+        //   if an element's `Drop` impl panics, the vector's `Drop` impl will
+        //   do nothing (leaking the rest of the elements) instead of dropping
+        //   some twice.
         unsafe {
+            self.len = 0;
             std::ptr::drop_in_place(elems);
         }
+    }
+
+    /// Drop the Array and its elements.
+    pub fn drop(mut self) {
+        self.clear();
     }
 
     /// Returns the number of initialized elements.
@@ -198,7 +207,7 @@ fn const_array() {
             panic!("unexpected slice content");
         }
 
-        let cleared = a.clear();
+        let cleared = a.const_clear();
 
         if let Some(1) = cleared[0]
             && let Some(2) = cleared[1]
