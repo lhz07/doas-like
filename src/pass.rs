@@ -1,4 +1,4 @@
-use crate::{c, utils::array::Array};
+use crate::{c, utils::array::ArrayRef};
 use std::{
     ffi::{CStr, c_char},
     fs,
@@ -6,11 +6,7 @@ use std::{
     os::fd::AsFd as _,
 };
 
-pub fn read_passwd<const N: usize>(
-    prompt: &CStr,
-    buf: &mut Array<N, c_char>,
-    pwfeedback: bool,
-) -> io::Result<()> {
+pub fn read_passwd(prompt: &CStr, buf: &mut ArrayRef<c_char>, pwfeedback: bool) -> io::Result<()> {
     let mut term = Term::new(buf, pwfeedback)?;
     term.write(prompt.to_bytes())?;
     loop {
@@ -66,18 +62,18 @@ fn open_tty() -> io::Result<fs::File> {
         .open("/dev/tty")
 }
 
-struct Term<'a, const N: usize> {
+struct Term<'a> {
     tty: fs::File,
     origin_termios: libc::termios,
-    buf: &'a mut Array<N, c_char>,
+    buf: &'a mut ArrayRef<c_char>,
     pwfeedback: bool,
 }
 
-impl<'a, const N: usize> Term<'a, N> {
-    fn new(buf: &'a mut Array<N, c_char>, pwfeedback: bool) -> io::Result<Self> {
+impl<'a> Term<'a> {
+    fn new(buf: &'a mut ArrayRef<c_char>, pwfeedback: bool) -> io::Result<Self> {
         let tty = open_tty()?;
-        let mut termios = c::get_terminal_attr(tty.as_fd())?;
-        let origin_termios = termios;
+        let origin_termios = c::get_terminal_attr(tty.as_fd())?;
+        let mut termios = origin_termios;
         c::cfmakeraw(&mut termios);
         // termios.c_lflag &= !(libc::ECHO | libc::ICANON);
         c::set_terminal_attr(tty.as_fd(), &termios)?;
@@ -102,7 +98,7 @@ impl<'a, const N: usize> Term<'a, N> {
     }
 }
 
-impl<'a, const N: usize> Drop for Term<'a, N> {
+impl<'a> Drop for Term<'a> {
     fn drop(&mut self) {
         if self.pwfeedback && !self.buf.is_empty() {
             // clear the feedback

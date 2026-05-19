@@ -14,25 +14,24 @@ use std::{mem::MaybeUninit, ops::Range};
 /// If `T: Drop`, values stored in the array will not be automatically
 /// dropped when the array goes out of scope in const code. You need to manually
 /// call `clear()` or `drop()`.
+#[repr(C)]
 pub struct Array<const N: usize, T> {
-    data: [MaybeUninit<T>; N],
     len: usize,
+    data: [MaybeUninit<T>; N],
 }
 
-impl<const N: usize, T> Array<N, T> {
-    pub const fn new() -> Self {
-        Self {
-            // Safety: every element is `MaybeUninit`.
-            data: unsafe { MaybeUninit::uninit().assume_init() },
-            len: 0,
-        }
-    }
+#[repr(C)]
+pub struct ArrayRef<T> {
+    len: usize,
+    data: [MaybeUninit<T>],
+}
 
+impl<T> ArrayRef<T> {
     /// Appends an element to the end of the array.
     ///
     /// Panics if the array is already full.
     pub const fn push(&mut self, val: T) {
-        assert!(self.len < N, "array is full!");
+        assert!(self.len < self.data.len(), "array is full!");
         // Safety:
         // `self.len < N` guarantees the slot is in bounds and uninitialized.
         unsafe {
@@ -42,7 +41,7 @@ impl<const N: usize, T> Array<N, T> {
     }
 
     pub const fn push_checked(&mut self, val: T) -> Result<(), T> {
-        if self.len >= N {
+        if self.len >= self.data.len() {
             return Err(val);
         }
         // Safety:
@@ -64,6 +63,87 @@ impl<const N: usize, T> Array<N, T> {
             // - ownership is moved exactly once
             unsafe { Some(self.data[self.len].as_mut_ptr().read()) }
         }
+    }
+
+    pub fn clear(&mut self) {
+        let elems: *mut [T] = self.as_mut_slice();
+
+        // SAFETY:
+        // - `elems` comes directly from `as_mut_slice` and is therefore valid.
+        // - Setting `self.len` before calling `drop_in_place` means that,
+        //   if an element's `Drop` impl panics, the vector's `Drop` impl will
+        //   do nothing (leaking the rest of the elements) instead of dropping
+        //   some twice.
+        unsafe {
+            self.len = 0;
+            std::ptr::drop_in_place(elems);
+        }
+    }
+
+    /// Returns the number of initialized elements.
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub const fn capacity(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Returns a shared slice of initialized elements.
+    pub const fn as_slice(&self) -> &[T] {
+        // Safety:
+        // Only the first `self.len` elements are exposed.
+        // Those elements are guaranteed to be initialized.
+        let data = unsafe { self.data.assume_init_ref() };
+        slice(data, 0..self.len)
+    }
+
+    /// Returns a mutable slice of initialized elements.
+    pub const fn as_mut_slice(&mut self) -> &mut [T] {
+        // Safety:
+        // Only the first `self.len` elements are exposed.
+        // Those elements are guaranteed to be initialized.
+        unsafe {
+            core::slice::from_raw_parts_mut(self.data.assume_init_mut().as_mut_ptr(), self.len)
+        }
+    }
+
+    pub const fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                self.data.as_mut_ptr().add(self.len),
+                self.capacity() - self.len,
+            )
+        }
+    }
+}
+
+impl<const N: usize, T> Array<N, T> {
+    pub const fn new() -> Self {
+        Self {
+            // Safety: every element is `MaybeUninit`.
+            data: unsafe { MaybeUninit::uninit().assume_init() },
+            len: 0,
+        }
+    }
+
+    /// Appends an element to the end of the array.
+    ///
+    /// Panics if the array is already full.
+    pub const fn push(&mut self, val: T) {
+        self.as_array_ref_mut().push(val);
+    }
+
+    pub const fn push_checked(&mut self, val: T) -> Result<(), T> {
+        self.as_array_ref_mut().push_checked(val)
+    }
+
+    pub const fn pop(&mut self) -> Option<T> {
+        self.as_array_ref_mut().pop()
     }
 
     /// Clears the array and returns all elements as `Option<T>`.
@@ -105,18 +185,7 @@ impl<const N: usize, T> Array<N, T> {
     }
 
     pub fn clear(&mut self) {
-        let elems: *mut [T] = self.as_mut_slice();
-
-        // SAFETY:
-        // - `elems` comes directly from `as_mut_slice` and is therefore valid.
-        // - Setting `self.len` before calling `drop_in_place` means that,
-        //   if an element's `Drop` impl panics, the vector's `Drop` impl will
-        //   do nothing (leaking the rest of the elements) instead of dropping
-        //   some twice.
-        unsafe {
-            self.len = 0;
-            std::ptr::drop_in_place(elems);
-        }
+        self.as_array_ref_mut().clear();
     }
 
     /// Drop the Array and its elements.
@@ -135,37 +204,54 @@ impl<const N: usize, T> Array<N, T> {
 
     /// Returns a shared slice of initialized elements.
     pub const fn as_slice(&self) -> &[T] {
-        // Safety:
-        // Only the first `self.len` elements are exposed.
-        // Those elements are guaranteed to be initialized.
-        let data = unsafe { self.data.assume_init_ref() };
-        slice(data, 0..self.len)
+        self.as_array_ref().as_slice()
     }
 
     /// Returns a mutable slice of initialized elements.
     pub const fn as_mut_slice(&mut self) -> &mut [T] {
-        // Safety:
-        // Only the first `self.len` elements are exposed.
-        // Those elements are guaranteed to be initialized.
-        unsafe {
-            core::slice::from_raw_parts_mut(self.data.assume_init_mut().as_mut_ptr(), self.len)
-        }
+        self.as_array_ref_mut().as_mut_slice()
     }
 
     pub const fn spare_capacity_mut(&mut self) -> &mut [MaybeUninit<T>] {
-        unsafe {
-            core::slice::from_raw_parts_mut(
-                self.data.as_mut_ptr().add(self.len),
-                self.capacity() - self.len,
-            )
-        }
+        self.as_array_ref_mut().spare_capacity_mut()
     }
 
     #[inline]
     pub const fn capacity(&self) -> usize {
         N
     }
+
+    pub const fn as_array_ref(&self) -> &ArrayRef<T> {
+        unsafe {
+            let ptr = self as *const Array<N, T> as *const MaybeUninit<T>;
+            let slice_ptr = std::ptr::slice_from_raw_parts(ptr, N);
+            let array_ref_ptr = slice_ptr as *const ArrayRef<T>;
+            &*array_ref_ptr
+        }
+    }
+
+    pub const fn as_array_ref_mut(&mut self) -> &mut ArrayRef<T> {
+        let ptr = self as *mut Array<N, T> as *mut MaybeUninit<T>;
+        unsafe {
+            let slice_ptr = std::ptr::slice_from_raw_parts_mut(ptr, N);
+            let array_ref_ptr = slice_ptr as *mut ArrayRef<T>;
+            &mut *array_ref_ptr
+        }
+    }
 }
+
+// TODO: implement these when const trait is stablized.
+// impl<const N: usize, T> Deref for Array<N, T> {
+//     type Target = ArrayRef<T>;
+//     fn deref(&self) -> &Self::Target {
+//         self.as_array_ref()
+//     }
+// }
+// impl<const N: usize, T> DerefMut for Array<N, T> {
+//     fn deref_mut(&mut self) -> &mut Self::Target {
+//         self.as_array_ref_mut()
+//     }
+// }
 
 /// Returns a subslice for the given range.
 ///
@@ -185,10 +271,23 @@ pub const fn slice<T>(s: &[T], idx: Range<usize>) -> &[T] {
 }
 
 #[test]
+fn transmute_array_ref() {
+    let mut array = Array::<10, _>::new();
+    array.push("a".to_string());
+    array.push("b".to_string());
+    let array_ref_mut = array.as_array_ref_mut();
+    array_ref_mut.push("c".to_string());
+    let slice = array_ref_mut.as_slice();
+    assert_eq!(slice, ["a".to_string(), "b".to_string(), "c".to_string()]);
+    assert!(array.len() == 3);
+
+    array.clear();
+}
+
+#[test]
 fn const_array() {
     const {
         let mut a = Array::<3, i32>::new();
-
         a.push(1);
         a.push(2);
         a.push(3);

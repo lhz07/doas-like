@@ -20,7 +20,7 @@ fn pam_prompt(msg: &CStr, pwfeedback: bool) -> Result<NonNull<c_char>, u32> {
     const N: usize = PAM_MAX_RESP_SIZE as usize + 1;
     let mut buf = Array::<N, _>::new();
     let pass = unsafe {
-        read_passwd(msg, &mut buf, pwfeedback).map_err(|_| PAM_CONV_ERR)?;
+        read_passwd(msg, buf.as_array_ref_mut(), pwfeedback).map_err(|_| PAM_CONV_ERR)?;
         c::strdup(buf.as_slice().as_ptr())
     };
     buf.as_mut_slice().zeroize();
@@ -139,8 +139,7 @@ impl Drop for PamResp {
 }
 
 pub fn pam_auth(target_user: &CStr, myname: &CStr, pwfeedback: bool) -> Result<(), ()> {
-    let hostname = c::gethostname()
-        .map_or(c"?".into(), Cow::Owned);
+    let hostname = c::gethostname().map_or(c"?".into(), Cow::Owned);
     let name_bytes = myname.to_bytes();
     let hostname_bytes = hostname.to_bytes();
     let name_max = name_bytes.len().min(32);
