@@ -87,6 +87,29 @@ impl CmdArgs {
             }
         }
 
+        // check conflicts
+        if parsed.clear
+            && (!parsed.command.is_empty()
+                || parsed.shell
+                || parsed.user.is_some()
+                || parsed.config.is_some()
+                || parsed.non_interactive
+                || parsed.verbose)
+        {
+            eprintln!("'-L' cannot be used with other options");
+            usage!();
+        }
+        if parsed.verbose && parsed.config.is_none() {
+            eprintln!("'-v' requires '-C'");
+            usage!();
+        }
+        if parsed.config.is_some()
+            && (parsed.shell || parsed.non_interactive || parsed.user.is_some())
+        {
+            eprintln!("'-C' is conflicted with '-u', '-s', '-n'");
+            usage!();
+        }
+
         if !parsed.shell && !parsed.clear && parsed.config.is_none() && parsed.command.is_empty() {
             eprintln!("missing command");
             usage!();
