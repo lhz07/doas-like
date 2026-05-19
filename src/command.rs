@@ -14,6 +14,8 @@ pub struct CmdArgs {
     /// command matching results. No command is executed.
     pub config: Option<OsString>,
 
+    pub verbose: bool,
+
     /// User name or uid
     ///
     /// Execute the command as user. The default is root.
@@ -42,7 +44,7 @@ macro_rules! usage {
 
 #[inline]
 fn usage() {
-    eprintln!("usage: doas [-Lns] [-a style] [-C config] [-u user] command [arg ...]");
+    eprintln!("usage: doas [-Lnsv] [-C config] [-u user] command [arg ...]");
 }
 
 impl CmdArgs {
@@ -122,6 +124,14 @@ impl CmdArgs {
                     usage!();
                 }
                 self.clear = true;
+            }
+            b'v' => {
+                if self.verbose {
+                    eprintln!("'-v' cannot be used multiple times");
+
+                    usage!();
+                }
+                self.verbose = true;
             }
             b'u' => {
                 if self.user.is_some() {

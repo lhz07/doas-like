@@ -47,7 +47,14 @@ fn inner_main() -> Result<(), ()> {
     };
 
     if let Some(path) = args.config {
-        return check_config(path.as_ref(), real_uid, &groups, target_uid, &argvs);
+        return check_config(
+            path.as_ref(),
+            real_uid,
+            &groups,
+            target_uid,
+            &argvs,
+            args.verbose,
+        );
     }
 
     let cmdline = argvs.join(" ".as_ref());
