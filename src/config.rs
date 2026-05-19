@@ -2,7 +2,8 @@ use libc::{gid_t, uid_t};
 use std::{
     borrow::Cow,
     ffi::{OsStr, OsString},
-    fmt, fs,
+    fmt::{self, Display},
+    fs,
     io::{self, Read as _},
     os::unix::{
         ffi::OsStrExt as _,
@@ -22,7 +23,13 @@ use crate::{
 pub enum ConfigError<'a> {
     IO(io::Error, &'a Path),
     Permission(&'static str, &'a Path),
-    Syntax(Cow<'static, str>, usize),
+    Syntax(Cow<'static, str>, usize, Box<ParsingConfig>),
+}
+
+impl<'a> ConfigError<'a> {
+    fn syntax(err: Cow<'static, str>, line: usize, config: ParsingConfig) -> Self {
+        Self::Syntax(err, line, Box::new(config))
+    }
 }
 
 impl<'a> fmt::Display for ConfigError<'a> {
@@ -32,33 +39,46 @@ impl<'a> fmt::Display for ConfigError<'a> {
             Self::Permission(e, path) => {
                 writeln!(f, "permission: {e}, file path: {}", path.display())
             }
-            Self::Syntax(e, line) => writeln!(f, "syntax: line {line}: {e}"),
+            Self::Syntax(e, line, parsing_config) => writeln!(
+                f,
+                "syntax: line {line}: {e}\nparsed config:\n\n{}",
+                parsing_config
+            ),
         }
     }
 }
 
 impl<'a> std::error::Error for ConfigError<'a> {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Action {
     Permit,
     Deny,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Env {
     Keep(String),
     Remove(String),
     Set { key: String, val: Val },
 }
 
-#[derive(Debug)]
+impl Display for Env {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Env::Keep(_) | Env::Remove(_) => write!(f, "{:?}", self),
+            Env::Set { key, val } => write!(f, "Set(\"{}\"={:?})", key, val),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum Val {
     New(String),
     FromEnv(String),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Options {
     pub nopass: bool,
     pub pwfeedback: bool,
@@ -82,6 +102,15 @@ pub enum Identity {
     Both { user: String, group: String },
 }
 
+impl Display for Identity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::User(_) | Self::Group(_) => write!(f, "{:?}", self),
+            Self::Both { user, group } => write!(f, "User(\"{}\"), Group(\"{}\")", user, group),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Config {
     action: Action,
@@ -91,32 +120,108 @@ pub struct Config {
     cmd: Option<Cmd>,
 }
 
+#[derive(Debug, Default)]
+pub struct ParsingConfig {
+    action: Option<Action>,
+    options: Options,
+    identity: Option<Identity>,
+    target: Option<String>,
+    cmd: Option<Cmd>,
+}
+
+impl Display for Options {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.nopass {
+            write!(f, "nopass ")?;
+        }
+        if self.pwfeedback {
+            write!(f, "pwfeedback ")?;
+        }
+        if self.insult {
+            write!(f, "insult ")?;
+        }
+        if self.nolog {
+            write!(f, "nolog ")?;
+        }
+        if self.keepenv {
+            write!(f, "keepenv ")?;
+        }
+        if let Some(dur) = self.persist {
+            write!(f, "persist {{{:?}}} ", dur)?;
+        }
+        if !self.envs.is_empty() {
+            write!(f, "setenv\nenvs: {{ ")?;
+            for env in self.envs.iter() {
+                write!(f, "{env} ")?;
+            }
+            write!(f, "}}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for ParsingConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "action: ")?;
+        match self.action {
+            Some(action) => writeln!(f, "{:?}", action)?,
+            None => writeln!(f, "None")?,
+        }
+
+        if self.options != Options::default() {
+            writeln!(f, "options: {}", self.options)?;
+        }
+
+        write!(f, "identity: ")?;
+        match &self.identity {
+            Some(identity) => writeln!(f, "{}", identity)?,
+            None => writeln!(f, "None")?,
+        }
+
+        if let Some(target) = &self.target {
+            writeln!(f, "target: {}", target)?;
+        }
+        if let Some(cmd) = &self.cmd {
+            writeln!(f, "cmd: {}", cmd.cmd)?;
+            if let Some(args) = &cmd.cmd_args {
+                writeln!(f, "args: {:?}", args)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 static DEFAULT_TIMEOUT: Duration = Duration::from_mins(5);
 
 fn parser<'a, T>(tokens: &mut Tokenizer<T>) -> Result<Config, ConfigError<'a>>
 where
     T: Iterator<Item = State>,
 {
-    // let mut tokens = tokens.into_iter().peekable();
-
+    let mut paring_config = ParsingConfig::default();
     // there must be an action
     let action = match tokens.next() {
         Some(s) if s.is_key("permit") => Action::Permit,
         Some(s) if s.is_key("deny") => Action::Deny,
-        _ => return Err(ConfigError::Syntax("missing action".into(), tokens.line())),
+        _ => {
+            return Err(ConfigError::syntax(
+                "missing action".into(),
+                tokens.line(),
+                paring_config,
+            ));
+        }
     };
+    paring_config.action = Some(action);
 
     // optional options
-    let mut options = Options::default();
     'outer: loop {
         match tokens.peek() {
             Some(token) if !token.quoted() => match token.as_str() {
                 "nopass" => {
-                    options.nopass = true;
+                    paring_config.options.nopass = true;
                     tokens.next();
                 }
                 "nolog" => {
-                    options.nolog = true;
+                    paring_config.options.nolog = true;
                     tokens.next();
                 }
                 "persist" => {
@@ -126,55 +231,63 @@ where
                     {
                         tokens.next();
                         let Some(duration) = tokens.next() else {
-                            return Err(ConfigError::Syntax(
+                            return Err(ConfigError::syntax(
                                 "missing duration after \"persist { \"".into(),
                                 tokens.line(),
+                                paring_config,
                             ));
                         };
                         match Duration::from_str(duration.as_str()) {
-                            Ok(dur) => options.persist = Some(dur),
+                            Ok(dur) => paring_config.options.persist = Some(dur),
                             Err(e) => {
-                                return Err(ConfigError::Syntax(e.into(), tokens.line()));
+                                return Err(ConfigError::syntax(
+                                    e.into(),
+                                    tokens.line(),
+                                    paring_config,
+                                ));
                             }
                         }
                         if let Some(s) = tokens.next()
                             && !s.is_key("}")
                         {
-                            return Err(ConfigError::Syntax(
+                            return Err(ConfigError::syntax(
                                 "missing \"}\" after duration".into(),
                                 tokens.line(),
+                                paring_config,
                             ));
                         }
                     } else {
-                        options.persist = Some(DEFAULT_TIMEOUT);
+                        paring_config.options.persist = Some(DEFAULT_TIMEOUT);
                     }
                 }
                 "pwfeedback" => {
-                    options.pwfeedback = true;
+                    paring_config.options.pwfeedback = true;
                     tokens.next();
                 }
                 "keepenv" => {
-                    options.keepenv = true;
+                    paring_config.options.keepenv = true;
                     tokens.next();
                 }
                 "insult" => {
-                    options.insult = true;
+                    paring_config.options.insult = true;
                     tokens.next();
                 }
                 "setenv" => {
                     tokens.next();
                     if tokens.next().is_none_or(|s| !s.is_key("{")) {
-                        return Err(ConfigError::Syntax(
+                        return Err(ConfigError::syntax(
                             "missing envs after \"setenv\"".into(),
                             tokens.line(),
+                            paring_config,
                         ));
                     }
                     while let Some(token) = tokens.next() {
                         if token.is_key("}") {
-                            if options.envs.is_empty() {
-                                return Err(ConfigError::Syntax(
+                            if paring_config.options.envs.is_empty() {
+                                return Err(ConfigError::syntax(
                                     "missing envs inside \"{}\"".into(),
                                     tokens.line(),
+                                    paring_config,
                                 ));
                             }
                             continue 'outer;
@@ -188,16 +301,17 @@ where
                             // -PKG_CACHE
                             // -PKG_CACHE_2
                             if env.is_empty() {
-                                return Err(ConfigError::Syntax(
+                                return Err(ConfigError::syntax(
                                     format!(
                                         "invalid env: {}, missing an env after \"-\"",
                                         token.as_str()
                                     )
                                     .into(),
                                     tokens.line(),
+                                    paring_config,
                                 ));
                             }
-                            options.envs.push(Env::Remove(env.to_owned()));
+                            paring_config.options.envs.push(Env::Remove(env.to_owned()));
                         }
                         // PKG="/path/to"
                         // PKG=/path"/to"
@@ -210,13 +324,14 @@ where
                             token.before_quoted().split_once("=")
                         {
                             if key.is_empty() {
-                                return Err(ConfigError::Syntax(
+                                return Err(ConfigError::syntax(
                                     format!(
                                         "invalid env: {}, missing a key before \"=\"",
                                         token.as_str()
                                     )
                                     .into(),
                                     tokens.line(),
+                                    paring_config,
                                 ));
                             }
                             let (key, val) = token
@@ -225,38 +340,44 @@ where
                                 .expect("we have checked before");
 
                             if val.is_empty() {
-                                return Err(ConfigError::Syntax(
+                                return Err(ConfigError::syntax(
                                     format!(
                                         "invalid env: {}, missing a value after \"=\"",
                                         token.as_str()
                                     )
                                     .into(),
                                     tokens.line(),
+                                    paring_config,
                                 ));
                             }
                             let val = match val_unquote.split_once("$") {
                                 Some(("", "")) => {
-                                    return Err(ConfigError::Syntax(
+                                    return Err(ConfigError::syntax(
                                         "missing env name after \"$\"".into(),
                                         tokens.line(),
+                                        paring_config,
                                     ));
                                 }
                                 Some(("", value)) => Val::FromEnv(value.to_owned()),
                                 _ => Val::New(val.to_owned()),
                             };
-                            options.envs.push(Env::Set {
+                            paring_config.options.envs.push(Env::Set {
                                 key: key.to_owned(),
                                 val,
                             });
                         } else if !token.quoted() {
-                            options.envs.push(Env::Keep(token.into_string()));
+                            paring_config
+                                .options
+                                .envs
+                                .push(Env::Keep(token.into_string()));
                         } else {
                             eprintln!("warning: quoted env: \"{}\" is ignored", token.as_str());
                         }
                     }
-                    return Err(ConfigError::Syntax(
+                    return Err(ConfigError::syntax(
                         "missing \"}\" after envs".into(),
                         tokens.line(),
+                        paring_config,
                     ));
                 }
                 _ => {
@@ -269,25 +390,27 @@ where
                 break;
             }
             None => {
-                return Err(ConfigError::Syntax(
+                return Err(ConfigError::syntax(
                     "missing identity".into(),
                     tokens.line(),
+                    paring_config,
                 ));
             }
         }
     }
 
     // there must be an identity
-    let identity = match tokens.next() {
+    let identity_str = match tokens.next() {
         Some(i) => i.into_string(),
         _ => {
-            return Err(ConfigError::Syntax(
+            return Err(ConfigError::syntax(
                 "missing identity".into(),
                 tokens.line(),
+                paring_config,
             ));
         }
     };
-    let identity = match identity.split_once(":") {
+    let identity = match identity_str.split_once(":") {
         Some((user, group)) => {
             if !user.is_empty() && !group.is_empty() {
                 Identity::Both {
@@ -297,19 +420,21 @@ where
             } else if !group.is_empty() {
                 Identity::Group(group.to_owned())
             } else if !user.is_empty() {
-                Identity::User(identity)
+                Identity::User(identity_str)
             } else {
-                return Err(ConfigError::Syntax(
+                return Err(ConfigError::syntax(
                     "missing identity".into(),
                     tokens.line(),
+                    paring_config,
                 ));
             }
         }
-        None => Identity::User(identity),
+        None => Identity::User(identity_str),
     };
+    paring_config.identity = Some(identity);
 
     // optional target
-    let target = if let Some(token) = tokens.peek()
+    paring_config.target = if let Some(token) = tokens.peek()
         && token.is_key("as")
     {
         tokens.next();
@@ -317,9 +442,10 @@ where
         match tokens.next() {
             Some(target) => Some(target.into_string()),
             None => {
-                return Err(ConfigError::Syntax(
+                return Err(ConfigError::syntax(
                     "missing target after \"as\"".into(),
                     tokens.line(),
+                    paring_config,
                 ));
             }
         }
@@ -328,48 +454,50 @@ where
     };
 
     // optional cmd
-    let cmd = if let Some(token) = tokens.next() {
+    if let Some(token) = tokens.next() {
         if !token.is_key("cmd") {
-            return Err(ConfigError::Syntax(
+            return Err(ConfigError::syntax(
                 "expected \"cmd\" before command".into(),
                 tokens.line(),
+                paring_config,
             ));
         }
         let cmd = match tokens.next() {
             Some(s) => s.into_string(),
             None => {
-                return Err(ConfigError::Syntax(
+                return Err(ConfigError::syntax(
                     "missing command after \"cmd\"".into(),
                     tokens.line(),
+                    paring_config,
                 ));
             }
         };
-        // optional args
-        let cmd_args = match tokens.next() {
-            Some(arg) => {
-                if arg.is_key("args") {
-                    let args = tokens.by_ref().map(|t| t.into_string()).collect();
-                    Some(args)
-                } else {
-                    return Err(ConfigError::Syntax(
-                        "expected \"args\" after command".into(),
-                        tokens.line(),
-                    ));
-                }
-            }
-            None => None,
+        let cmd = Cmd {
+            cmd,
+            cmd_args: None,
         };
-        Some(Cmd { cmd, cmd_args })
-    } else {
-        None
-    };
+        let cmd = paring_config.cmd.insert(cmd);
+        // optional args
+        if let Some(arg) = tokens.next() {
+            if arg.is_key("args") {
+                let args = tokens.by_ref().map(|t| t.into_string()).collect();
+                cmd.cmd_args = Some(args);
+            } else {
+                return Err(ConfigError::syntax(
+                    "expected \"args\" after command".into(),
+                    tokens.line(),
+                    paring_config,
+                ));
+            }
+        }
+    }
 
     let config = Config {
         action,
-        options,
-        identity,
-        target,
-        cmd,
+        options: paring_config.options,
+        identity: paring_config.identity.expect("identity is set before"),
+        target: paring_config.target,
+        cmd: paring_config.cmd,
     };
 
     Ok(config)
