@@ -3,7 +3,7 @@ use crate::{
     c, c_format,
     pass::read_passwd,
     syslog,
-    utils::array::Array,
+    utils::array::{Array, ArrayRef},
     warnx,
 };
 use libc::{LOG_AUTHPRIV, LOG_NOTICE, c_char, c_int, c_void};
@@ -19,13 +19,29 @@ fn pam_prompt(msg: &CStr, pwfeedback: bool) -> Result<NonNull<c_char>, u32> {
     use bindings::{PAM_CONV_ERR, PAM_MAX_RESP_SIZE};
     const N: usize = PAM_MAX_RESP_SIZE as usize + 1;
     let mut buf = Array::<N, _>::new();
+    let safebuf = SafeBuf::new(buf.as_array_ref_mut());
     let pass = unsafe {
-        read_passwd(msg, buf.as_array_ref_mut(), pwfeedback).map_err(|_| PAM_CONV_ERR)?;
-        c::strdup(buf.as_slice().as_ptr())
+        read_passwd(msg, safebuf.buf, pwfeedback).map_err(|_| PAM_CONV_ERR)?;
+        c::strdup(safebuf.buf.as_slice().as_ptr())
     };
-    buf.as_mut_slice().zeroize();
-    buf.spare_capacity_mut().zeroize();
     Ok(pass)
+}
+
+struct SafeBuf<'a> {
+    buf: &'a mut ArrayRef<c_char>,
+}
+
+impl<'a> SafeBuf<'a> {
+    fn new(buf: &'a mut ArrayRef<c_char>) -> Self {
+        Self { buf }
+    }
+}
+
+impl<'a> Drop for SafeBuf<'a> {
+    fn drop(&mut self) {
+        self.buf.as_mut_slice().zeroize();
+        self.buf.spare_capacity_mut().zeroize();
+    }
 }
 
 struct PamData {
