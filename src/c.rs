@@ -96,7 +96,14 @@ pub fn calloc(n: usize, size: usize) -> NonNull<c_void> {
         }
     }
 }
-
+/// # Platform-specific behavior
+///
+/// This program currently only targets Linux and macOS, where the underlying
+/// `getgroups` system call is guaranteed to include the main group ID.
+///
+/// If support for other POSIX-compliant platforms is added in the future,
+/// this implementation should be updated to explicitly append `getgid()`
+/// if it is missing, as its inclusion is implementation-defined by POSIX.
 pub fn getgroups() -> Result<Vec<gid_t>, ()> {
     use bindings::NGROUPS_MAX;
     // on macOS, NGROUPS_MAX is 16, while on Linux,
@@ -109,7 +116,7 @@ pub fn getgroups() -> Result<Vec<gid_t>, ()> {
             err!("getgroups");
         }
         let ngroups = ngroups as usize;
-        let mut vec = Vec::with_capacity(ngroups + 1);
+        let mut vec = Vec::with_capacity(ngroups);
         vec.extend(&groups[..ngroups]);
         Ok(vec)
     }
@@ -140,13 +147,6 @@ pub fn gethostname() -> io::Result<CString> {
         let s = CStr::from_ptr(buf.as_ptr()).to_owned();
         Ok(s)
     }
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn get_all_groups() -> Result<Vec<gid_t>, ()> {
-    let mut groups = getgroups()?;
-    groups.push(getgid());
-    Ok(groups)
 }
 
 pub fn random_index(len: u32) -> u32 {
