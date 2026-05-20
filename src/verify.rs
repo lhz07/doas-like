@@ -1,11 +1,18 @@
+use libc::uid_t;
+
 use crate::{errx, insults, pam};
 use std::ffi::CStr;
 
-pub fn auth(target_user: &CStr, myname: &CStr, insult: bool, pwfeedback: bool) -> Result<(), ()> {
+pub fn auth(
+    target_user: &CStr,
+    myname: &CStr,
+    insult: bool,
+    pwfeedback: bool,
+    real_uid: uid_t,
+) -> Result<(), ()> {
     #[cfg(feature = "apple-auth")]
-    if auth_by_local_authentication() {
-        return Ok(());
-    }
+    auth_by_local_authentication(real_uid)?;
+    let _ = real_uid;
     // fall back to pam authentication
     for _ in 0..3 {
         let res = pam::pam_auth(target_user, myname, pwfeedback);
@@ -22,7 +29,8 @@ pub fn auth(target_user: &CStr, myname: &CStr, insult: bool, pwfeedback: bool) -
 }
 
 #[cfg(feature = "apple-auth")]
-fn auth_by_local_authentication() -> bool {
+fn auth_by_local_authentication(real_uid: uid_t) -> Result<(), ()> {
+    use crate::c;
     use objc2::runtime::Bool;
     use objc2_foundation::ns_string;
     use objc2_local_authentication::{LAContext, LAPolicy};
@@ -30,6 +38,7 @@ fn auth_by_local_authentication() -> bool {
         sync::{Arc, atomic::AtomicBool},
         thread,
     };
+
     let policy = LAPolicy::DeviceOwnerAuthenticationWithBiometricsOrCompanion;
     let context = unsafe { LAContext::new() };
     if unsafe { context.canEvaluatePolicy_error(policy).is_ok() } {
@@ -44,12 +53,17 @@ fn auth_by_local_authentication() -> bool {
             mark.unpark();
         });
         let reason = ns_string!("authenticate to get root privilege");
+        // downgrade to real uid
+        c::seteuid(real_uid)?;
         unsafe { context.evaluatePolicy_localizedReason_reply(policy, reason, &block) };
         while !finished.load(std::sync::atomic::Ordering::Relaxed) {
             thread::park();
         }
-        successful.load(std::sync::atomic::Ordering::Relaxed)
+        // upgrade to euid
+        c::setreuid(0, 0)?;
+        let success = successful.load(std::sync::atomic::Ordering::Relaxed);
+        if success { Ok(()) } else { Err(()) }
     } else {
-        false
+        Err(())
     }
 }

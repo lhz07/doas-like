@@ -48,3 +48,5 @@ stable_sort_primitive = "warn"
 str_to_string = "warn"
 unnecessary_semicolon = "warn"
 unused_trait_names = "warn"
+# some type is different on Linux and macOS, so we always need to cast them.
+unnecessary_cast = "allow"

@@ -1,8 +1,8 @@
 use crate::{
     SAFE_PATH,
-    bindings::{self, pam_handle_t, proc_bsdinfo},
+    bindings::{self, pam_handle_t},
     config::{Config, Env, Val},
-    err, errx,
+    err, errx, sys,
     timestamp::Time,
     utils::selfref::{OwnedRef, SelfRef},
     warn, warnx,
@@ -12,7 +12,8 @@ use std::{
     collections::HashMap,
     env,
     ffi::{CStr, CString, OsStr, OsString, c_void},
-    io, mem,
+    io::{self, Write as _},
+    mem,
     os::{
         fd::{AsRawFd as _, BorrowedFd},
         unix::ffi::OsStrExt as _,
@@ -45,7 +46,11 @@ pub fn getppid() -> pid_t {
 // very simple bindings -------------------------------------------
 
 pub fn setprogname(name: &CStr) {
-    unsafe { libc::setprogname(name.as_ptr()) }
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::setprogname(name.as_ptr())
+    }
+    let _ = name;
 }
 
 pub fn setuid(uid: uid_t) -> Result<(), ()> {
@@ -144,15 +149,8 @@ pub fn get_all_groups() -> Result<Vec<gid_t>, ()> {
     Ok(groups)
 }
 
-#[cfg(any(
-    target_os = "macos",
-    target_os = "freebsd",
-    target_os = "dragonfly",
-    target_os = "openbsd",
-    target_os = "netbsd"
-))]
-pub fn arc4random_uniform(len: u32) -> u32 {
-    unsafe { libc::arc4random_uniform(len) }
+pub fn random_index(len: u32) -> u32 {
+    sys::random_index(len)
 }
 
 pub struct Passwd {
@@ -160,7 +158,6 @@ pub struct Passwd {
     pub pw_passwd: OwnedRef<CStr>,
     pub pw_uid: uid_t,
     pub pw_gid: gid_t,
-    pub pw_class: OwnedRef<CStr>,
     pub pw_gecos: OwnedRef<CStr>,
     pub pw_dir: OwnedRef<CStr>,
     pub pw_shell: OwnedRef<CStr>,
@@ -174,7 +171,6 @@ impl Passwd {
                 pw_passwd: OwnedRef::new(CStr::from_ptr((*passwd).pw_passwd)),
                 pw_uid: (*passwd).pw_uid,
                 pw_gid: (*passwd).pw_gid,
-                pw_class: OwnedRef::new(CStr::from_ptr((*passwd).pw_class)),
                 pw_gecos: OwnedRef::new(CStr::from_ptr((*passwd).pw_gecos)),
                 pw_dir: OwnedRef::new(CStr::from_ptr((*passwd).pw_dir)),
                 pw_shell: OwnedRef::new(CStr::from_ptr((*passwd).pw_shell)),
@@ -225,7 +221,7 @@ pub fn getpwuid(uid: uid_t) -> Result<SelfRef<Passwd, Vec<c_char>>, ()> {
     Ok(passwd)
 }
 
-pub fn initgroups(user: &CStr, basegroup: c_int) -> Result<(), ()> {
+pub fn initgroups(user: &CStr, basegroup: gid_t) -> Result<(), ()> {
     unsafe { libc::initgroups(user.as_ptr(), basegroup).map(|| warn!("initgroups")) }
 }
 
@@ -246,39 +242,18 @@ pub struct ProcessInfo {
 }
 
 pub fn get_proc_info() -> Result<ProcessInfo, ()> {
-    let ppid = getppid();
-    let sid = getsid(0)?;
-    let info = unsafe {
-        let mut info: proc_bsdinfo = mem::zeroed();
-        let res = bindings::proc_pidinfo(
-            ppid,
-            bindings::PROC_PIDTBSDINFO as i32,
-            0,
-            &raw mut info as _,
-            size_of_val(&info) as c_int,
-        );
-        if res == -1 {
-            err!("get proc info");
-        }
-        info
-    };
-    let start_time = info.pbi_start_tvsec;
-    let tty = info.e_tdev;
-    if start_time == 0 || tty == 0 {
-        errx!("get proc info");
-    }
-    Ok(ProcessInfo {
-        ppid,
-        sid,
-        tty,
-        start_time,
-    })
+    sys::get_proc_info_impl()
 }
 
-/// # CLOCK_MONOTONIC_RAW
+/// # CLOCK_MONOTONIC_RAW (on macOS)
 /// clock that increments monotonically, tracking the time since an arbitrary point like
 /// CLOCK_MONOTONIC.  However, this clock is unaffected by frequency or time adjustments.  It
 /// should not be compared to other system time sources.
+///
+/// # CLOCK_BOOTTIME (since Linux 2.6.39; Linux-specific)
+/// A nonsettable system-wide clock that is identical to CLOCK_MONOTONIC, except that it also includes any time that the system  is  suspended.   This allows applications to get a suspend-aware monotonic clock without having to deal with
+/// the complications of CLOCK_REALTIME, which may have discontinuities if the time is changed using settimeofday(2)  or
+/// similar.
 ///
 /// # CLOCK_REALTIME
 /// the system's real time (i.e. wall time) clock, expressed as the amount of time since the
@@ -370,7 +345,7 @@ pub fn pam_close_session(pamh: &mut pam_handle_t, flags: c_int) -> Result<(), ()
     }
 }
 
-pub fn pam_strerror(pamh: &pam_handle_t, error_number: c_int) -> &CStr {
+pub fn pam_strerror(pamh: &mut pam_handle_t, error_number: c_int) -> &CStr {
     unsafe { CStr::from_ptr(bindings::pam_strerror(pamh, error_number)) }
 }
 
@@ -467,13 +442,13 @@ where
 pub fn parse_uid(uid: &str) -> Result<uid_t, ()> {
     let cstr = CString::new(uid).map_err(|_| ())?;
     if let Some(pw) = getpwnam(cstr.as_c_str()) {
-        if pw.pw_uid == bindings::UID_MAX {
+        if pw.pw_uid == sys::UID_MAX {
             return Err(());
         }
         return Ok(pw.pw_uid);
     }
     let uid = uid.parse().map_err(|_| ())?;
-    if uid == bindings::UID_MAX {
+    if uid == sys::UID_MAX {
         return Err(());
     }
     Ok(uid)
@@ -482,13 +457,13 @@ pub fn parse_uid(uid: &str) -> Result<uid_t, ()> {
 pub fn parse_gid(gid: &str) -> Result<gid_t, ()> {
     let cstr = CString::new(gid).map_err(|_| ())?;
     if let Some(gr) = getgrnam(cstr.as_c_str()) {
-        if gr.gr_gid == bindings::GID_MAX {
+        if gr.gr_gid == sys::GID_MAX {
             return Err(());
         }
         return Ok(gr.gr_gid);
     }
     let gid = gid.parse().map_err(|_| ())?;
-    if gid == bindings::GID_MAX {
+    if gid == sys::GID_MAX {
         return Err(());
     }
     Ok(gid)
@@ -515,6 +490,12 @@ pub fn perror(str: &CStr) {
     }
 }
 
+pub fn eprint(str: &[u8]) {
+    if let Err(e) = std::io::stderr().write_all(str) {
+        panic!("failed printing to stderr: {e}");
+    }
+}
+
 trait MapErrNo {
     fn map<F, T>(self, f: F) -> Result<(), T>
     where
@@ -522,7 +503,7 @@ trait MapErrNo {
     fn map_pam<F, T>(self, f: F) -> Result<(), T>
     where
         F: FnOnce() -> T;
-    fn map_to_pam_str(self, pamh: &pam_handle_t) -> Result<(), &CStr>;
+    fn map_to_pam_str(self, pamh: &mut pam_handle_t) -> Result<(), &CStr>;
     fn map_pam_direct(self) -> Result<(), Self>
     where
         Self: Sized;
@@ -556,7 +537,7 @@ impl MapErrNo for c_int {
         }
     }
 
-    fn map_to_pam_str(self, pamh: &pam_handle_t) -> Result<(), &CStr> {
+    fn map_to_pam_str(self, pamh: &mut pam_handle_t) -> Result<(), &CStr> {
         if self == bindings::PAM_SUCCESS as i32 {
             Ok(())
         } else {
