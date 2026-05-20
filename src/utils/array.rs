@@ -222,21 +222,17 @@ impl<const N: usize, T> Array<N, T> {
     }
 
     pub const fn as_array_ref(&self) -> &ArrayRef<T> {
-        unsafe {
-            let ptr = self as *const Array<N, T> as *const MaybeUninit<T>;
-            let slice_ptr = std::ptr::slice_from_raw_parts(ptr, N);
-            let array_ref_ptr = slice_ptr as *const ArrayRef<T>;
-            &*array_ref_ptr
-        }
+        let ptr = self as *const Array<N, T> as *const MaybeUninit<T>;
+        let slice_ptr = std::ptr::slice_from_raw_parts(ptr, N);
+        let array_ref_ptr = slice_ptr as *const ArrayRef<T>;
+        unsafe { &*array_ref_ptr }
     }
 
     pub const fn as_array_ref_mut(&mut self) -> &mut ArrayRef<T> {
         let ptr = self as *mut Array<N, T> as *mut MaybeUninit<T>;
-        unsafe {
-            let slice_ptr = std::ptr::slice_from_raw_parts_mut(ptr, N);
-            let array_ref_ptr = slice_ptr as *mut ArrayRef<T>;
-            &mut *array_ref_ptr
-        }
+        let slice_ptr = std::ptr::slice_from_raw_parts_mut(ptr, N);
+        let array_ref_ptr = slice_ptr as *mut ArrayRef<T>;
+        unsafe { &mut *array_ref_ptr }
     }
 }
 
