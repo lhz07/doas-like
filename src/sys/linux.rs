@@ -37,6 +37,6 @@ fn getrandom() -> u32 {
     u32::from_ne_bytes(buf)
 }
 
-pub fn get_proc_info_impl() -> Result<ProcessInfo, ()> {
+pub fn get_proc_info() -> Result<ProcessInfo, ()> {
     todo!()
 }

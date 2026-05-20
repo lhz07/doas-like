@@ -9,6 +9,9 @@ use crate::{c, err, errx};
 
 pub const BOOT_TIME: libc::clockid_t = libc::CLOCK_MONOTONIC_RAW;
 
+pub const UID_MAX: libc::uid_t = bindings::UID_MAX;
+pub const GID_MAX: libc::gid_t = bindings::GID_MAX;
+
 impl CrossStat for bindings::stat {
     fn st_atime(&self) -> bindings::timespec {
         self.st_atimespec
@@ -22,7 +25,7 @@ pub fn random_index(len: u32) -> u32 {
     unsafe { libc::arc4random_uniform(len) }
 }
 
-pub fn get_proc_info_impl() -> Result<ProcessInfo, ()> {
+pub fn get_proc_info() -> Result<ProcessInfo, ()> {
     use libc::proc_bsdinfo;
     let ppid = c::getppid();
     let sid = c::getsid(0)?;

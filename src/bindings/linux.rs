@@ -420,7 +420,7 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub fn futimens(__fd: ::std::os::raw::c_int, __times: *const timespec)
-        -> ::std::os::raw::c_int;
+    -> ::std::os::raw::c_int;
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]

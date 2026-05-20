@@ -58,7 +58,7 @@ use std::{
 const TIMESTAMP_DIR: &str = "/var/run/doas";
 
 fn get_path() -> Result<PathBuf, ()> {
-    let proc = c::get_proc_info()?;
+    let proc = sys::get_proc_info()?;
     // 2-2-34816-470-0
     Ok(Path::new(TIMESTAMP_DIR).join(format!(
         "{}-{}-{}-{}-{}",

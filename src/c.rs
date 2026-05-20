@@ -48,7 +48,7 @@ pub fn getppid() -> pid_t {
 pub fn setprogname(name: &CStr) {
     #[cfg(target_os = "macos")]
     unsafe {
-        libc::setprogname(name.as_ptr())
+        libc::setprogname(name.as_ptr());
     }
     let _ = name;
 }
@@ -222,7 +222,7 @@ pub fn getpwuid(uid: uid_t) -> Result<SelfRef<Passwd, Vec<c_char>>, ()> {
 }
 
 pub fn initgroups(user: &CStr, basegroup: gid_t) -> Result<(), ()> {
-    unsafe { libc::initgroups(user.as_ptr(), basegroup).map(|| warn!("initgroups")) }
+    unsafe { libc::initgroups(user.as_ptr(), basegroup as _).map(|| warn!("initgroups")) }
 }
 
 pub fn getsid(pid: pid_t) -> Result<pid_t, ()> {
@@ -239,10 +239,6 @@ pub struct ProcessInfo {
     pub sid: pid_t,
     pub start_time: u64,
     pub tty: u32,
-}
-
-pub fn get_proc_info() -> Result<ProcessInfo, ()> {
-    sys::get_proc_info_impl()
 }
 
 /// # CLOCK_MONOTONIC_RAW (on macOS)

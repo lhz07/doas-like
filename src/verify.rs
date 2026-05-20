@@ -1,6 +1,5 @@
-use libc::uid_t;
-
 use crate::{errx, insults, pam};
+use libc::uid_t;
 use std::ffi::CStr;
 
 pub fn auth(
@@ -11,7 +10,18 @@ pub fn auth(
     real_uid: uid_t,
 ) -> Result<(), ()> {
     #[cfg(feature = "apple-auth")]
-    auth_by_local_authentication(real_uid)?;
+    {
+        use crate::c;
+        // downgrade to real uid
+        c::seteuid(real_uid)?;
+        let success = auth_by_local_authentication();
+        // upgrade to euid
+        c::setreuid(0, 0)?;
+        if success {
+            return Ok(());
+        }
+    }
+
     let _ = real_uid;
     // fall back to pam authentication
     for _ in 0..3 {
@@ -29,8 +39,7 @@ pub fn auth(
 }
 
 #[cfg(feature = "apple-auth")]
-fn auth_by_local_authentication(real_uid: uid_t) -> Result<(), ()> {
-    use crate::c;
+fn auth_by_local_authentication() -> bool {
     use objc2::runtime::Bool;
     use objc2_foundation::ns_string;
     use objc2_local_authentication::{LAContext, LAPolicy};
@@ -53,17 +62,12 @@ fn auth_by_local_authentication(real_uid: uid_t) -> Result<(), ()> {
             mark.unpark();
         });
         let reason = ns_string!("authenticate to get root privilege");
-        // downgrade to real uid
-        c::seteuid(real_uid)?;
         unsafe { context.evaluatePolicy_localizedReason_reply(policy, reason, &block) };
         while !finished.load(std::sync::atomic::Ordering::Relaxed) {
             thread::park();
         }
-        // upgrade to euid
-        c::setreuid(0, 0)?;
-        let success = successful.load(std::sync::atomic::Ordering::Relaxed);
-        if success { Ok(()) } else { Err(()) }
+        successful.load(std::sync::atomic::Ordering::Relaxed)
     } else {
-        Err(())
+        false
     }
 }
