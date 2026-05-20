@@ -11,9 +11,6 @@ pub const GID_MAX: u32 = 2147483647;
 pub const NGROUPS_MAX: u32 = 16;
 pub const UID_MAX: u32 = 2147483647;
 pub const PROC_PIDTBSDINFO: u32 = 3;
-pub const RPP_ECHO_OFF: u32 = 0;
-pub const RPP_ECHO_ON: u32 = 1;
-pub const RPP_REQUIRE_TTY: u32 = 2;
 pub type __uint16_t = ::std::os::raw::c_ushort;
 pub type __int32_t = ::std::os::raw::c_int;
 pub type __uint32_t = ::std::os::raw::c_uint;
@@ -102,14 +99,6 @@ unsafe extern "C" {
     pub fn futimens(__fd: ::std::os::raw::c_int, __times: *const timespec)
     -> ::std::os::raw::c_int;
 }
-pub const clockid_t__CLOCK_REALTIME: clockid_t = 0;
-pub const clockid_t__CLOCK_MONOTONIC: clockid_t = 6;
-pub const clockid_t__CLOCK_MONOTONIC_RAW: clockid_t = 4;
-pub const clockid_t__CLOCK_MONOTONIC_RAW_APPROX: clockid_t = 5;
-pub const clockid_t__CLOCK_UPTIME_RAW: clockid_t = 8;
-pub const clockid_t__CLOCK_UPTIME_RAW_APPROX: clockid_t = 9;
-pub const clockid_t__CLOCK_PROCESS_CPUTIME_ID: clockid_t = 12;
-pub const clockid_t__CLOCK_THREAD_CPUTIME_ID: clockid_t = 16;
 pub type clockid_t = ::std::os::raw::c_uint;
 unsafe extern "C" {
     pub fn clock_gettime(__clock_id: clockid_t, __tp: *mut timespec) -> ::std::os::raw::c_int;
@@ -197,14 +186,6 @@ unsafe extern "C" {
         buffersize: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int;
 }
-unsafe extern "C" {
-    pub fn readpassphrase(
-        arg1: *const ::std::os::raw::c_char,
-        arg2: *mut ::std::os::raw::c_char,
-        __bufsiz: usize,
-        arg3: ::std::os::raw::c_int,
-    ) -> *mut ::std::os::raw::c_char;
-}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct pam_message {
@@ -261,75 +242,22 @@ pub struct pam_handle {
 }
 pub type pam_handle_t = pam_handle;
 pub const PAM_SUCCESS: _bindgen_ty_4 = 0;
-pub const PAM_OPEN_ERR: _bindgen_ty_4 = 1;
-pub const PAM_SYMBOL_ERR: _bindgen_ty_4 = 2;
-pub const PAM_SERVICE_ERR: _bindgen_ty_4 = 3;
-pub const PAM_SYSTEM_ERR: _bindgen_ty_4 = 4;
-pub const PAM_BUF_ERR: _bindgen_ty_4 = 5;
 pub const PAM_CONV_ERR: _bindgen_ty_4 = 6;
-pub const PAM_PERM_DENIED: _bindgen_ty_4 = 7;
-pub const PAM_MAXTRIES: _bindgen_ty_4 = 8;
-pub const PAM_AUTH_ERR: _bindgen_ty_4 = 9;
 pub const PAM_NEW_AUTHTOK_REQD: _bindgen_ty_4 = 10;
-pub const PAM_CRED_INSUFFICIENT: _bindgen_ty_4 = 11;
-pub const PAM_AUTHINFO_UNAVAIL: _bindgen_ty_4 = 12;
-pub const PAM_USER_UNKNOWN: _bindgen_ty_4 = 13;
-pub const PAM_CRED_UNAVAIL: _bindgen_ty_4 = 14;
-pub const PAM_CRED_EXPIRED: _bindgen_ty_4 = 15;
-pub const PAM_CRED_ERR: _bindgen_ty_4 = 16;
-pub const PAM_ACCT_EXPIRED: _bindgen_ty_4 = 17;
-pub const PAM_AUTHTOK_EXPIRED: _bindgen_ty_4 = 18;
-pub const PAM_SESSION_ERR: _bindgen_ty_4 = 19;
-pub const PAM_AUTHTOK_ERR: _bindgen_ty_4 = 20;
-pub const PAM_AUTHTOK_RECOVERY_ERR: _bindgen_ty_4 = 21;
-pub const PAM_AUTHTOK_LOCK_BUSY: _bindgen_ty_4 = 22;
-pub const PAM_AUTHTOK_DISABLE_AGING: _bindgen_ty_4 = 23;
-pub const PAM_NO_MODULE_DATA: _bindgen_ty_4 = 24;
-pub const PAM_IGNORE: _bindgen_ty_4 = 25;
-pub const PAM_ABORT: _bindgen_ty_4 = 26;
-pub const PAM_TRY_AGAIN: _bindgen_ty_4 = 27;
-pub const PAM_MODULE_UNKNOWN: _bindgen_ty_4 = 28;
-pub const PAM_DOMAIN_UNKNOWN: _bindgen_ty_4 = 29;
-pub const PAM_NUM_ERRORS: _bindgen_ty_4 = 30;
-pub const PAM_APPLE_MIN_ERROR: _bindgen_ty_4 = 1024;
-pub const PAM_APPLE_ACCT_TEMP_LOCK: _bindgen_ty_4 = 1024;
-pub const PAM_APPLE_ACCT_LOCKED: _bindgen_ty_4 = 1025;
-pub const PAM_APPLE_KEK_ERROR: _bindgen_ty_4 = 1026;
-pub const PAM_APPLE_WRONG_CARD: _bindgen_ty_4 = 1027;
-pub const PAM_APPLE_MAX_ERROR: _bindgen_ty_4 = 1028;
-pub const PAM_APPLE_NUM_ERRORS: _bindgen_ty_4 = 4;
 pub type _bindgen_ty_4 = ::std::os::raw::c_uint;
 pub const PAM_PROMPT_ECHO_OFF: _bindgen_ty_5 = 1;
 pub const PAM_PROMPT_ECHO_ON: _bindgen_ty_5 = 2;
 pub const PAM_ERROR_MSG: _bindgen_ty_5 = 3;
 pub const PAM_TEXT_INFO: _bindgen_ty_5 = 4;
-pub const PAM_MAX_NUM_MSG: _bindgen_ty_5 = 32;
-pub const PAM_MAX_MSG_SIZE: _bindgen_ty_5 = 512;
 pub const PAM_MAX_RESP_SIZE: _bindgen_ty_5 = 512;
 pub type _bindgen_ty_5 = ::std::os::raw::c_uint;
 pub const PAM_SILENT: _bindgen_ty_6 = -2147483648;
-pub const PAM_DISALLOW_NULL_AUTHTOK: _bindgen_ty_6 = 1;
-pub const PAM_ESTABLISH_CRED: _bindgen_ty_6 = 1;
 pub const PAM_DELETE_CRED: _bindgen_ty_6 = 2;
 pub const PAM_REINITIALIZE_CRED: _bindgen_ty_6 = 4;
-pub const PAM_REFRESH_CRED: _bindgen_ty_6 = 8;
-pub const PAM_PRELIM_CHECK: _bindgen_ty_6 = 1;
-pub const PAM_UPDATE_AUTHTOK: _bindgen_ty_6 = 2;
 pub const PAM_CHANGE_EXPIRED_AUTHTOK: _bindgen_ty_6 = 4;
 pub type _bindgen_ty_6 = ::std::os::raw::c_int;
-pub const PAM_SERVICE: _bindgen_ty_7 = 1;
 pub const PAM_USER: _bindgen_ty_7 = 2;
-pub const PAM_TTY: _bindgen_ty_7 = 3;
-pub const PAM_RHOST: _bindgen_ty_7 = 4;
-pub const PAM_CONV: _bindgen_ty_7 = 5;
-pub const PAM_AUTHTOK: _bindgen_ty_7 = 6;
-pub const PAM_OLDAUTHTOK: _bindgen_ty_7 = 7;
 pub const PAM_RUSER: _bindgen_ty_7 = 8;
-pub const PAM_USER_PROMPT: _bindgen_ty_7 = 9;
-pub const PAM_REPOSITORY: _bindgen_ty_7 = 10;
-pub const PAM_AUTHTOK_PROMPT: _bindgen_ty_7 = 11;
-pub const PAM_OLDAUTHTOK_PROMPT: _bindgen_ty_7 = 12;
-pub const PAM_NUM_ITEMS: _bindgen_ty_7 = 13;
 pub type _bindgen_ty_7 = ::std::os::raw::c_uint;
 unsafe extern "C" {
     pub fn pam_acct_mgmt(
