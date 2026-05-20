@@ -1,6 +1,6 @@
 use crate::{
     bindings::{self, pam_handle, pam_message, pam_response},
-    c, c_format,
+    c, c_format, eprintf,
     pass::read_passwd,
     syslog,
     utils::array::{Array, ArrayRef},
@@ -71,12 +71,11 @@ unsafe extern "C" fn pamconv(
         match msg.msg_style as u32 {
             bindings::PAM_PROMPT_ECHO_OFF | bindings::PAM_PROMPT_ECHO_ON => {
                 let mut prompt = unsafe { CStr::from_ptr(msg.msg) };
-                if prompt == c"Password:"
+                if (prompt == c"Password:" || prompt == c"Password: ")
                     && let Some(doas_prompt) = doas_prompt
                 {
                     prompt = doas_prompt;
                 }
-
                 let pass = match pam_prompt(prompt, pwfeedback) {
                     Ok(pass) => pass,
                     Err(e) => return e as i32,
@@ -89,7 +88,7 @@ unsafe extern "C" fn pamconv(
             }
             bindings::PAM_ERROR_MSG | bindings::PAM_TEXT_INFO => {
                 let msg = unsafe { CStr::from_ptr(msg.msg) };
-                eprintln!("{:?}", msg);
+                eprintf!("{}\n", msg);
             }
             _ => {
                 eprintln!("invalid PAM msg_style {}", msg.msg_style);
@@ -193,7 +192,11 @@ pub fn pam_auth(target_user: &CStr, myname: &CStr, pwfeedback: bool) -> Result<(
     // account not vaild or changing the auth token failed
     if let Err(ret) = c::pam_acct_mgmt(pam_guard.pamh, 0)
         && ((ret != bindings::PAM_NEW_AUTHTOK_REQD as i32)
-            || c::pam_chauthtok(pam_guard.pamh, bindings::PAM_CHANGE_EXPIRED_AUTHTOK).is_err())
+            || c::pam_chauthtok(
+                pam_guard.pamh,
+                bindings::PAM_CHANGE_EXPIRED_AUTHTOK as c_int,
+            )
+            .is_err())
     {
         syslog!(LOG_AUTHPRIV | LOG_NOTICE, "failed auth for {}", myname);
         return Err(());
@@ -203,7 +206,7 @@ pub fn pam_auth(target_user: &CStr, myname: &CStr, pwfeedback: bool) -> Result<(
         warnx!("pam_set_item(?, PAM_USER, {:?}): {:?}", target_user, e);
     }
 
-    if let Err((_, e)) = c::pam_setcred(pam_guard.pamh, bindings::PAM_REINITIALIZE_CRED) {
+    if let Err((_, e)) = c::pam_setcred(pam_guard.pamh, bindings::PAM_REINITIALIZE_CRED as c_int) {
         warnx!("pam_setcred(?, PAM_REINITIALIZE_CRED): {:?}", e);
     } else {
         pam_guard.cred = 1;
@@ -224,8 +227,10 @@ impl Drop for PamGuard<'_> {
             process::exit(1);
         }
         if self.cred != 0
-            && let Err((ret, e)) =
-                c::pam_setcred(self.pamh, bindings::PAM_DELETE_CRED | bindings::PAM_SILENT)
+            && let Err((ret, e)) = c::pam_setcred(
+                self.pamh,
+                bindings::PAM_DELETE_CRED as c_int | bindings::PAM_SILENT as c_int,
+            )
         {
             warnx!("pam_setcred(?, PAM_DELETE_CRED | PAM_SILENT): {:?}", e);
             status = ret;

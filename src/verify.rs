@@ -1,11 +1,28 @@
 use crate::{errx, insults, pam};
+use libc::uid_t;
 use std::ffi::CStr;
 
-pub fn auth(target_user: &CStr, myname: &CStr, insult: bool, pwfeedback: bool) -> Result<(), ()> {
+pub fn auth(
+    target_user: &CStr,
+    myname: &CStr,
+    insult: bool,
+    pwfeedback: bool,
+    real_uid: uid_t,
+) -> Result<(), ()> {
     #[cfg(feature = "apple-auth")]
-    if auth_by_local_authentication() {
-        return Ok(());
+    {
+        use crate::c;
+        // downgrade to real uid
+        c::seteuid(real_uid)?;
+        let success = auth_by_local_authentication();
+        // upgrade to euid
+        c::setreuid(0, 0)?;
+        if success {
+            return Ok(());
+        }
     }
+
+    let _ = real_uid;
     // fall back to pam authentication
     for _ in 0..3 {
         let res = pam::pam_auth(target_user, myname, pwfeedback);
@@ -30,6 +47,7 @@ fn auth_by_local_authentication() -> bool {
         sync::{Arc, atomic::AtomicBool},
         thread,
     };
+
     let policy = LAPolicy::DeviceOwnerAuthenticationWithBiometricsOrCompanion;
     let context = unsafe { LAContext::new() };
     if unsafe { context.canEvaluatePolicy_error(policy).is_ok() } {

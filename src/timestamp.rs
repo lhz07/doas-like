@@ -40,7 +40,8 @@
 //! assumes an adversary without root privileges, which is the standard
 //! threat model for a setuid privilege-escalation tool.
 use crate::bindings::timespec;
-use crate::{c, err, errx, warnx};
+use crate::sys::CrossStat as _;
+use crate::{c, err, errx, sys, warnx};
 use std::time::Duration;
 use std::{
     cmp,
@@ -57,7 +58,7 @@ use std::{
 const TIMESTAMP_DIR: &str = "/var/run/doas";
 
 fn get_path() -> Result<PathBuf, ()> {
-    let proc = c::get_proc_info()?;
+    let proc = sys::get_proc_info()?;
     // 2-2-34816-470-0
     Ok(Path::new(TIMESTAMP_DIR).join(format!(
         "{}-{}-{}-{}-{}",
@@ -183,13 +184,13 @@ pub fn check(file: &File, timeout: Duration) -> Result<bool, ()> {
         errx!("timestamp uid, gid or mode wrong");
     }
     let stat = c::fstat(file.as_raw_fd())?;
-    let expire_boot_time = Time::new(stat.st_atimespec);
-    let expire_real_time = Time::new(stat.st_mtimespec);
+    let expire_boot_time = Time::new(stat.st_atime());
+    let expire_real_time = Time::new(stat.st_mtime());
     // this timestamp was created but never set, invalid but no error
     if !expire_boot_time.is_set() || !expire_real_time.is_set() {
         return Ok(false);
     }
-    let Ok(boot_time) = c::clock_gettime(libc::CLOCK_MONOTONIC_RAW) else {
+    let Ok(boot_time) = c::clock_gettime(sys::BOOT_TIME) else {
         return Ok(false);
     };
     let Ok(real_time) = c::clock_gettime(libc::CLOCK_REALTIME) else {
@@ -209,7 +210,7 @@ pub fn check(file: &File, timeout: Duration) -> Result<bool, ()> {
 
 pub fn set(file: &File, timeout: Duration) -> Result<(), ()> {
     let timeout = Time::from_duration(timeout);
-    let boot_time = c::clock_gettime(libc::CLOCK_MONOTONIC_RAW)? + timeout;
+    let boot_time = c::clock_gettime(sys::BOOT_TIME)? + timeout;
     let real_time = c::clock_gettime(libc::CLOCK_REALTIME)? + timeout;
     c::futimens(file.as_raw_fd(), &[boot_time, real_time])
 }

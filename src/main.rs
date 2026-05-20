@@ -5,7 +5,7 @@ use doas::{
     config::{Config, check_config, permit},
     errx, syslog, timestamp, verify, warnx,
 };
-use libc::{LOG_AUTHPRIV, LOG_INFO, LOG_NOTICE};
+use libc::{LOG_AUTHPRIV, LOG_INFO, LOG_NOTICE, gid_t};
 use std::{
     env,
     ffi::OsStr,
@@ -83,8 +83,10 @@ fn inner_main() -> Result<(), ()> {
     };
 
     let mut persist_file = None;
+    // TODO: implement timestamp on Linux
     let persist_pass = {
-        if let Some(dur) = rule.options.persist
+        if cfg!(target_os = "macos")
+            && let Some(dur) = rule.options.persist
             && let Ok(file) = timestamp::open(dur)
         {
             let file = persist_file.insert(file);
@@ -97,17 +99,14 @@ fn inner_main() -> Result<(), ()> {
         if args.non_interactive {
             errx!("Authentication required");
         }
-        // downgrade to real uid
-        c::seteuid(real_uid)?;
         // authenticate user
         verify::auth(
             &target_pw.pw_name,
             &mypw.pw_name,
             rule.options.insult,
             rule.options.pwfeedback,
+            real_uid,
         )?;
-        // upgrade to euid
-        c::setreuid(0, 0)?;
     }
     if let Some(file) = persist_file
         && let Some(dur) = rule.options.persist
@@ -116,7 +115,7 @@ fn inner_main() -> Result<(), ()> {
     }
 
     c::setregid(target_pw.pw_gid, target_pw.pw_gid)?;
-    c::initgroups(&target_pw.pw_name, target_pw.pw_gid as i32)?;
+    c::initgroups(&target_pw.pw_name, target_pw.pw_gid as gid_t)?;
     c::setreuid(target_uid, target_uid)?;
     if !rule.options.nolog {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("(failed)"));

@@ -62,6 +62,6 @@ static INSULTS: [&str; 58] = [
 ];
 
 pub fn get_an_insult() -> &'static str {
-    let i = c::arc4random_uniform(INSULTS.len() as u32);
+    let i = c::random_index(INSULTS.len() as u32);
     INSULTS[i as usize]
 }

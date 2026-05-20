@@ -9,6 +9,7 @@ pub mod config;
 pub mod insults;
 pub mod pam;
 pub mod pass;
+pub mod sys;
 pub mod timestamp;
 pub mod tokenizer;
 pub mod utils;
@@ -36,6 +37,14 @@ macro_rules! warn {
 }
 
 #[macro_export]
+macro_rules! eprintf {
+    ($($arg:tt)*) => {{
+        let s = $crate::c_format!($($arg)*);
+        $crate::c::eprint(s.to_bytes());
+    }};
+}
+
+#[macro_export]
 macro_rules! errx {
     ($($arg:tt)*) => {{
         $crate::warnx!($($arg)*);
@@ -48,5 +57,13 @@ macro_rules! err {
     ($($arg:tt)*) => {{
         $crate::warn!($($arg)*);
         return Err(());
+    }};
+}
+
+#[macro_export]
+macro_rules! err_exit {
+    ($($arg:tt)*) => {{
+        $crate::warn!($($arg)*);
+        std::process::exit(1);
     }};
 }
