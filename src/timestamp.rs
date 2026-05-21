@@ -42,10 +42,11 @@
 use crate::bindings::timespec;
 use crate::sys::CrossStat as _;
 use crate::{c, err, errx, sys, warnx};
+use std::os::unix::fs::DirBuilderExt as _;
 use std::time::Duration;
 use std::{
     cmp,
-    fs::{self, File, FileTimes, Permissions},
+    fs::{self, File, FileTimes},
     io, ops,
     os::{
         fd::AsRawFd as _,
@@ -219,7 +220,7 @@ pub fn open(timeout: Duration) -> Result<File, ()> {
     // check the dir first
     match fs::metadata(TIMESTAMP_DIR) {
         Ok(meta) => {
-            if !meta.is_dir() || meta.uid() != 0 || (meta.permissions().mode() & 0o777) != 0o700 {
+            if !meta.is_dir() || meta.uid() != 0 || (meta.permissions().mode() & 0o777) != 0o0700 {
                 errx!("invalid timestamp dir");
             }
         }
@@ -227,9 +228,7 @@ pub fn open(timeout: Duration) -> Result<File, ()> {
             if e.kind() != io::ErrorKind::NotFound {
                 errx!("timestamp dir: {e}");
             }
-            if let Err(e) = fs::create_dir(TIMESTAMP_DIR)
-                .and_then(|_| fs::set_permissions(TIMESTAMP_DIR, Permissions::from_mode(0o700)))
-            {
+            if let Err(e) = fs::DirBuilder::new().mode(0o0700).create(TIMESTAMP_DIR) {
                 errx!("create timestamp dir at {TIMESTAMP_DIR}: {e}");
             }
         }
@@ -254,7 +253,7 @@ pub fn open(timeout: Duration) -> Result<File, ()> {
                 .create_new(true)
                 .write(true)
                 .custom_flags(libc::O_NOFOLLOW)
-                .mode(0o000)
+                .mode(0o0000)
                 .open(&tmp_path)
             {
                 Ok(f) => f,
