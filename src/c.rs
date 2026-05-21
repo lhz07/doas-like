@@ -1,5 +1,4 @@
 use crate::{
-    SAFE_PATH,
     bindings::{self, pam_handle_t},
     config::{Config, Env, Val},
     err, errx, sys,
@@ -372,19 +371,8 @@ fn create_env(mypw: &Passwd, target_pw: &Passwd) -> HashMap<OsString, OsString> 
     envs
 }
 
-fn set_path(envs: &mut HashMap<OsString, OsString>, has_cmd: bool) {
-    const PATH: &str = "PATH";
-    let val = if !has_cmd && let Some(val) = env::var_os(PATH) {
-        val
-    } else {
-        SAFE_PATH.into()
-    };
-    envs.insert(PATH.into(), val);
-}
-
 pub fn prep_env(mypw: &Passwd, target_pw: &Passwd, rule: Config) -> HashMap<OsString, OsString> {
     let mut envs = create_env(mypw, target_pw);
-    set_path(&mut envs, rule.has_cmd());
     if rule.options.keepenv {
         keep_envs(&mut envs);
     }
