@@ -3,7 +3,7 @@ use doas::{
     c::{self},
     command::CmdArgs,
     config::{Config, check_config, permit},
-    errx, syslog, timestamp, verify, warnx,
+    errx, sys, syslog, timestamp, verify, warnx,
 };
 use libc::{LOG_AUTHPRIV, LOG_INFO, LOG_NOTICE, gid_t};
 use std::{
@@ -18,7 +18,10 @@ fn inner_main() -> Result<(), ()> {
     let origin_euid = c::geteuid();
 
     c::setprogname(CNAME);
-    // no need to close fds, because std::process::Command will do it
+    // close or set CLOEXEC for derived fds
+    if let Err(e) = sys::closefrom(libc::STDERR_FILENO + 1) {
+        errx!("close fd error: {e}");
+    }
 
     // parse args
     let args = CmdArgs::parse()?;

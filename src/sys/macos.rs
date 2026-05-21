@@ -1,11 +1,9 @@
-use std::mem;
-
-use libc::c_int;
-
 use crate::bindings::{self};
-use crate::c::ProcessInfo;
+use crate::c::{MapErrNo as _, ProcessInfo};
 use crate::sys::CrossStat;
 use crate::{c, err, errx};
+use libc::c_int;
+use std::{fs, io, mem};
 
 pub const BOOT_TIME: libc::clockid_t = libc::CLOCK_MONOTONIC_RAW;
 
@@ -54,4 +52,28 @@ pub fn get_proc_info() -> Result<ProcessInfo, ()> {
         tty,
         start_time,
     })
+}
+
+pub fn closefrom(low: c_int) -> io::Result<()> {
+    // dir "." and ".." is skipped
+    let entries = fs::read_dir("/dev/fd")?;
+    for entry in entries {
+        let entry = entry?;
+        let filename = entry.file_name();
+        let fd = filename
+            .to_str()
+            .and_then(|s| s.parse::<c_int>().ok())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "file name is not an integer")
+            })?;
+        if fd < low {
+            continue;
+        }
+        // Only set CLOEXEC to avoid potential libdispatch crash when we close its fds.
+        // It also prevents closing the dir fd.
+        unsafe {
+            libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC).map(io::Error::last_os_error)?;
+        }
+    }
+    Ok(())
 }
