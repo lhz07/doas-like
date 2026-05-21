@@ -1,9 +1,11 @@
 use crate::{
     bindings::{self},
-    c::ProcessInfo,
+    c::{MapErrNo as _, ProcessInfo},
     err_exit,
     sys::CrossStat,
 };
+use libc::{c_int, c_uint};
+use std::io;
 
 pub const UID_MAX: libc::uid_t = 65535;
 pub const GID_MAX: libc::gid_t = 65535;
@@ -39,4 +41,15 @@ fn getrandom() -> u32 {
 
 pub fn get_proc_info() -> Result<ProcessInfo, ()> {
     todo!()
+}
+
+pub fn closefrom(low: c_int) -> io::Result<()> {
+    unsafe {
+        libc::close_range(
+            low as c_uint,
+            c_uint::MAX,
+            libc::CLOSE_RANGE_CLOEXEC as c_int,
+        )
+        .map(io::Error::last_os_error)
+    }
 }
