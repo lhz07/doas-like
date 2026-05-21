@@ -86,10 +86,8 @@ fn inner_main() -> Result<(), ()> {
     };
 
     let mut persist_file = None;
-    // TODO: implement timestamp on Linux
     let persist_pass = {
-        if cfg!(target_os = "macos")
-            && let Some(dur) = rule.options.persist
+        if let Some(dur) = rule.options.persist
             && let Ok(file) = timestamp::open(dur)
         {
             let file = persist_file.insert(file);
