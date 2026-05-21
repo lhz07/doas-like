@@ -492,7 +492,7 @@ pub fn eprint(str: &[u8]) {
     }
 }
 
-trait MapErrNo {
+pub trait MapErrNo {
     fn map<F, T>(self, f: F) -> Result<(), T>
     where
         F: FnOnce() -> T;
