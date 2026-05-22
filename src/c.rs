@@ -396,6 +396,11 @@ fn create_env(mypw: &Passwd, target_pw: &Passwd) -> HashMap<OsString, OsString> 
     envs.insert("DOAS_USER".into(), c_to_os(&mypw.pw_name));
     envs.insert("HOME".into(), c_to_os(&target_pw.pw_dir));
     envs.insert("LOGNAME".into(), c_to_os(&target_pw.pw_name));
+    // set safe PATH as the default PATH
+    envs.insert(
+        OsStr::new(PATH_KEY).to_owned(),
+        OsStr::new(SAFE_PATH).to_owned(),
+    );
     envs.insert("SHELL".into(), c_to_os(&target_pw.pw_shell));
     envs.insert("USER".into(), c_to_os(&target_pw.pw_name));
     fill_env_inherit(&copyset, &mut envs);
@@ -409,13 +414,6 @@ pub fn prep_env(mypw: &Passwd, target_pw: &Passwd, rule: Config) -> HashMap<OsSt
         keep_envs(&mut envs);
     }
     apply_rule_envs(&mut envs, rule.options.envs);
-    // set safe PATH as the default PATH
-    if !envs.contains_key(OsStr::new(PATH_KEY)) {
-        envs.insert(
-            OsStr::new(PATH_KEY).to_owned(),
-            OsStr::new(SAFE_PATH).to_owned(),
-        );
-    }
     envs
 }
 
