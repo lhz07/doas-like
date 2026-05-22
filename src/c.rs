@@ -1,4 +1,5 @@
 use crate::{
+    PATH_KEY, SAFE_PATH,
     bindings::{self, pam_handle_t},
     config::{Config, Env, Val},
     err, errx, sys,
@@ -17,6 +18,7 @@ use std::{
         fd::{AsRawFd as _, BorrowedFd},
         unix::ffi::OsStrExt as _,
     },
+    path::Path,
     ptr::NonNull,
 };
 
@@ -353,6 +355,38 @@ pub fn pam_end(pamh: &mut pam_handle_t, status: c_int) -> c_int {
     unsafe { bindings::pam_end(pamh, status) }
 }
 
+pub fn search_path(cmd: &OsStr, unparsed_path: &OsStr) -> Option<OsString> {
+    if unparsed_path.is_empty() || cmd.is_empty() {
+        return None;
+    }
+    let cmd_bytes = cmd.as_bytes();
+    if cmd_bytes.contains(&b'/') {
+        // absolute path, return early
+        return Some(cmd.to_owned());
+    }
+    for mut path in env::split_paths(unparsed_path) {
+        // treat empty path as current dir
+        if path.as_os_str().is_empty() {
+            path.push(".");
+        }
+        path.push(cmd);
+        // `fs::metadata` will traverse symbolic links to query information about the
+        // destination file.
+        if let Ok(stat) = std::fs::metadata(&path)
+            && stat.is_file()
+            && is_executable(&path).is_ok()
+        {
+            return Some(path.into_os_string());
+        }
+    }
+    None
+}
+
+fn is_executable(path: &Path) -> Result<(), ()> {
+    let cstr = CString::new(path.as_os_str().as_bytes()).map_err(|_| ())?;
+    unsafe { libc::access(cstr.as_ptr(), libc::X_OK).map(|| ()) }
+}
+
 #[inline]
 fn c_to_os(str: &CStr) -> OsString {
     OsStr::from_bytes(str.to_bytes()).to_os_string()
@@ -377,6 +411,13 @@ pub fn prep_env(mypw: &Passwd, target_pw: &Passwd, rule: Config) -> HashMap<OsSt
         keep_envs(&mut envs);
     }
     apply_rule_envs(&mut envs, rule.options.envs);
+    // set safe PATH as the default PATH
+    if !envs.contains_key(OsStr::new(PATH_KEY)) {
+        envs.insert(
+            OsStr::new(PATH_KEY).to_owned(),
+            OsStr::new(SAFE_PATH).to_owned(),
+        );
+    }
     envs
 }
 

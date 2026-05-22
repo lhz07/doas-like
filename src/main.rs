@@ -1,5 +1,5 @@
 use doas::{
-    CNAME, CONF_PATH, SAFE_PATH,
+    CNAME, CONF_PATH, PATH_KEY, SAFE_PATH,
     c::{self},
     command::CmdArgs,
     config::{Config, check_config, permit},
@@ -85,9 +85,6 @@ fn inner_main() -> Result<(), ()> {
         errx!("{err}");
     };
 
-    const PATH: &str = "PATH";
-    let former_path = env::var_os(PATH).unwrap_or_default();
-
     let mut persist_file = None;
     let persist_pass = {
         if let Some(dur) = rule.options.persist
@@ -132,19 +129,18 @@ fn inner_main() -> Result<(), ()> {
             cwd,
         );
     }
-    // set safe PATH
-    if rule.has_cmd() {
-        unsafe {
-            env::set_var(PATH, SAFE_PATH);
-        }
+    let cmd = if rule.has_cmd() {
+        // search program in safe PATH
+        c::search_path(cmd, SAFE_PATH.as_ref())
     } else {
-        unsafe {
-            env::set_var(PATH, former_path);
-        }
+        // search program in PATH
+        c::search_path(cmd, env::var_os(PATH_KEY).unwrap_or_default().as_ref())
     }
+    .ok_or_else(|| warnx!("{:?}: command not found", cmd))?;
+
     let envs = c::prep_env(&mypw, &target_pw, rule);
 
-    let err = process::Command::new(cmd)
+    let err = process::Command::new(&cmd)
         .args(cmd_args)
         .env_clear()
         .envs(envs)
