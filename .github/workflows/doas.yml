@@ -28,14 +28,14 @@ jobs:
         uses: actions/upload-artifact@v4.6.2
         with:
           name: aarch64-apple-darwin
-          path: target/release/bangumi_download
+          path: target/release/doas
       - name: Build for macOS (with apple-auth)
         run: cargo build --release --features apple-auth
       - name: Upload the build artifact
         uses: actions/upload-artifact@v4.6.2
         with:
           name: aarch64-apple-darwin(apple-auth)
-          path: target/release/bangumi_download
+          path: target/release/doas
       - name: Run tests
         run: cargo test && cargo +nightly miri test
   build_on_linux:
@@ -56,6 +56,6 @@ jobs:
         uses: actions/upload-artifact@v4.6.2
         with:
           name: x86_64_linux-gnu
-          path: target/release/bangumi_download
+          path: target/release/doas
       - name: Run tests
         run: cargo test && cargo +nightly miri test
