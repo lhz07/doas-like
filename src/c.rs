@@ -473,7 +473,11 @@ pub fn parse_uid(uid: &str) -> Result<uid_t, ()> {
         return Ok(pw.pw_uid);
     }
     let uid = uid.parse().map_err(|_| ())?;
-    if uid == sys::UID_MAX {
+    // uid_t may be a signed/unsigned number, use `Range` to ensure
+    // uid >=0 && uid < UID_MAX. It can also avoid clippy saying
+    // "comparison is useless due to type limits"
+    let range = 0..sys::UID_MAX;
+    if !range.contains(&uid) {
         return Err(());
     }
     Ok(uid)
@@ -488,7 +492,8 @@ pub fn parse_gid(gid: &str) -> Result<gid_t, ()> {
         return Ok(gr.gr_gid);
     }
     let gid = gid.parse().map_err(|_| ())?;
-    if gid == sys::GID_MAX {
+    let range = 0..sys::GID_MAX;
+    if !range.contains(&gid) {
         return Err(());
     }
     Ok(gid)
