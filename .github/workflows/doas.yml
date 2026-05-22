@@ -1,0 +1,61 @@
+name: doas
+
+on:
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_on_macos:
+    name: build on macOS
+    runs-on: macos-15
+    steps:
+      - name: Pull code
+        uses: actions/checkout@v4.2.2
+      - name: Install rustfmt
+        run: rustup component add --toolchain nightly-aarch64-apple-darwin rustfmt
+      - name: Install Miri
+        run: rustup component add --toolchain nightly-aarch64-apple-darwin miri
+      - name: Check format
+        run: cargo fmt --check
+      - name: Build for macOS
+        run: cargo build --release
+      - name: Upload the build artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: aarch64-apple-darwin
+          path: target/release/bangumi_download
+      - name: Build for macOS (with apple-auth)
+        run: cargo build --release --features apple-auth
+      - name: Upload the build artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: aarch64-apple-darwin(apple-auth)
+          path: target/release/bangumi_download
+      - name: Run tests
+        run: cargo test && cargo +nightly miri test
+  build_on_linux:
+    name: build on Linux
+    runs-on: ubuntu-22
+    steps:
+      - name: Pull code
+        uses: actions/checkout@v4.2.2
+      - name: Install rustfmt
+        run: rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
+      - name: Install Miri
+        run: rustup component add --toolchain nightly-x86_64-unknown-linux-gnu miri
+      - name: Check format
+        run: cargo fmt --check
+      - name: Build for Linux
+        run: cargo build --release --target x86_64-unknown-linux-musl
+      - name: Upload the build artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: x86_64_linux-gnu
+          path: target/release/bangumi_download
+      - name: Run tests
+        run: cargo test && cargo +nightly miri test
