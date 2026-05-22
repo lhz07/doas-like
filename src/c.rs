@@ -2,7 +2,7 @@ use crate::{
     PATH_KEY, SAFE_PATH,
     bindings::{self, pam_handle_t},
     config::{Config, Env, Val},
-    err, errx, sys,
+    err, err_exit, errx, sys,
     timestamp::Time,
     utils::selfref::{OwnedRef, SelfRef},
     warn, warnx,
@@ -78,8 +78,7 @@ pub unsafe fn strdup(str: *const c_char) -> NonNull<c_char> {
     match str {
         Some(str) => str,
         None => {
-            warn!("could not allocate str");
-            std::process::exit(1);
+            err_exit!("could not allocate str");
         }
     }
 }
@@ -91,8 +90,7 @@ pub fn calloc(n: usize, size: usize) -> NonNull<c_void> {
         match data {
             Some(data) => data,
             None => {
-                warn!("could not allocate memory for n: {}, size: {}", n, size);
-                std::process::exit(1);
+                err_exit!("could not allocate memory for n: {}, size: {}", n, size);
             }
         }
     }
