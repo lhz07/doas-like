@@ -1,7 +1,8 @@
-use crate::warnx;
+use crate::{VERSION, list_features, warnx};
 use std::{
     ffi::OsString,
     os::unix::ffi::{OsStrExt as _, OsStringExt as _},
+    process,
 };
 
 #[derive(Default)]
@@ -44,7 +45,7 @@ macro_rules! usage {
 
 #[inline]
 fn usage() {
-    eprintln!("usage: doas [-Lnsv] [-C config] [-u user] command [arg ...]");
+    eprintln!("usage: doas [--version] [-Lnsv] [-C config] [-u user] command [arg ...]");
 }
 
 impl CmdArgs {
@@ -67,6 +68,11 @@ impl CmdArgs {
                     args.next();
                     // pass values directly
                     return parsed.extend_cmds(args);
+                }
+                b"--version" => {
+                    println!("doas {}", VERSION);
+                    list_features!("apple-auth", "nightly");
+                    process::exit(0);
                 }
                 [b'-', _] => {
                     let option = args.next().unwrap().as_bytes()[1];

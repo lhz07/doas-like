@@ -20,6 +20,7 @@ pub const NAME: &str = "doas";
 pub const CONF_PATH: &str = "/etc/doas.conf";
 pub const SAFE_PATH: &str = "/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin";
 pub const PATH_KEY: &str = "PATH";
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[macro_export]
 macro_rules! warnx {
@@ -67,4 +68,26 @@ macro_rules! err_exit {
         $crate::warn!($($arg)*);
         std::process::exit(1);
     }};
+}
+
+#[macro_export]
+macro_rules! list_features {
+    ($($feature:literal),* $(,)?) => {
+        {
+            let mut any_enabled = false;
+            $(
+                if cfg!(feature = $feature) {
+                    any_enabled = true;
+                }
+            )*
+            if any_enabled {
+                println!("built with features:");
+                $(
+                    if cfg!(feature = $feature) {
+                        println!("  {}", $feature);
+                    }
+                )*
+            }
+        }
+    };
 }
