@@ -23,7 +23,7 @@ pub struct FmtWriter<'a> {
 }
 
 impl<'a> FmtWriter<'a> {
-    unsafe fn new(data: *const (), len: usize, write: WriteFn, _life: &'a ()) -> Self {
+    unsafe fn new<T: ?Sized>(data: *const (), len: usize, write: WriteFn, _life: &'a T) -> Self {
         Self {
             data,
             len,
@@ -55,26 +55,17 @@ pub trait WriteToBytes<'a> {
     fn get_writer(&'a self) -> FmtWriter<'a>;
 }
 
-impl<'a> WriteToBytes<'a> for usize {
-    fn get_writer(&'a self) -> FmtWriter<'a> {
-        let s = self.to_string();
-        let bytes = s.as_bytes();
-        let data = bytes.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, bytes.len(), general_write, &()) }
-    }
-}
-
 impl<'a> WriteToBytes<'a> for CStr {
     fn get_writer(&'a self) -> FmtWriter<'a> {
         let data = self.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, self.count_bytes(), general_write, &()) }
+        unsafe { FmtWriter::new(data, self.count_bytes(), general_write, self) }
     }
 }
 
 impl<'a> WriteToBytes<'a> for CString {
     fn get_writer(&'a self) -> FmtWriter<'a> {
         let data = self.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, self.count_bytes(), general_write, &()) }
+        unsafe { FmtWriter::new(data, self.count_bytes(), general_write, self) }
     }
 }
 
@@ -82,7 +73,7 @@ impl<'a> WriteToBytes<'a> for OsString {
     fn get_writer(&'a self) -> FmtWriter<'a> {
         let bytes = self.as_bytes();
         let data = bytes.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, bytes.len(), general_write, &()) }
+        unsafe { FmtWriter::new(data, bytes.len(), general_write, bytes) }
     }
 }
 
@@ -90,14 +81,14 @@ impl<'a> WriteToBytes<'a> for PathBuf {
     fn get_writer(&'a self) -> FmtWriter<'a> {
         let bytes = self.as_os_str().as_bytes();
         let data = bytes.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, bytes.len(), general_write, &()) }
+        unsafe { FmtWriter::new(data, bytes.len(), general_write, bytes) }
     }
 }
 
 impl<'a> WriteToBytes<'a> for [u8] {
     fn get_writer(&'a self) -> FmtWriter<'a> {
         let data = self.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, self.len(), general_write, &()) }
+        unsafe { FmtWriter::new(data, self.len(), general_write, self) }
     }
 }
 
@@ -128,7 +119,7 @@ impl<'a, const N: usize, const S: usize> WriteToBytes<'a> for CArgs<'a, N, S> {
             }
         }
         let data = self as *const _ as *const ();
-        unsafe { FmtWriter::new(data, self.count, write::<N, S>, &()) }
+        unsafe { FmtWriter::new(data, self.count, write::<N, S>, self) }
     }
 }
 
@@ -143,6 +134,6 @@ where
     fn get_writer(&'a self) -> FmtWriter<'a> {
         let str = self.as_ref();
         let data = str.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, str.len(), general_write, &()) }
+        unsafe { FmtWriter::new(data, str.len(), general_write, str) }
     }
 }

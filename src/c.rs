@@ -90,6 +90,8 @@ pub fn calloc(n: usize, size: usize) -> NonNull<c_void> {
         match data {
             Some(data) => data,
             None => {
+                let n = n.to_string();
+                let size = size.to_string();
                 err_exit!("could not allocate memory for n: {}, size: {}", n, size);
             }
         }
