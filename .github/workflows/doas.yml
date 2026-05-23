@@ -1,6 +1,8 @@
 name: doas
 
 on:
+  release:
+    types: [published]
   push:
     branches: ["master"]
   pull_request:
@@ -15,7 +17,7 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Pull code
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v4
       - name: Install rustfmt
         run: rustup component add --toolchain nightly-aarch64-apple-darwin rustfmt
       - name: Install Miri
@@ -24,26 +26,39 @@ jobs:
         run: cargo fmt --check
       - name: Build for macOS
         run: cargo build --release
+      - name: Rename binary for Release
+        if: github.event_name == 'release'
+        run: cp target/release/doas doas-${{ github.ref_name }}-aarch64-apple-darwin
       - name: Upload the build artifact
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7
         with:
           name: aarch64-apple-darwin
           path: target/release/doas
       - name: Build for macOS (with apple-auth)
         run: cargo build --release --features apple-auth
+      - name: Rename binary for Release
+        if: github.event_name == 'release'
+        run: cp target/release/doas doas-${{ github.ref_name }}-aarch64-apple-darwin(apple-auth)
       - name: Upload the build artifact
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7
         with:
           name: aarch64-apple-darwin(apple-auth)
           path: target/release/doas
       - name: Run tests
         run: cargo test && cargo +nightly miri test
+      - name: Upload macOS binary to Release
+        uses: softprops/action-gh-release@v3
+        if: github.event_name == 'release'
+        with:
+          files: |
+            doas-${{ github.ref_name }}-aarch64-apple-darwin
+            doas-${{ github.ref_name }}-aarch64-apple-darwin(apple-auth)
   build_on_linux:
     name: build on Linux
-    runs-on: ubuntu-22
+    runs-on: ubuntu-22.04
     steps:
       - name: Pull code
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v4
       - name: Install rustfmt
         run: rustup component add --toolchain nightly-x86_64-unknown-linux-gnu rustfmt
       - name: Install Miri
@@ -51,11 +66,19 @@ jobs:
       - name: Check format
         run: cargo fmt --check
       - name: Build for Linux
-        run: cargo build --release --target x86_64-unknown-linux-musl
+        run: cargo build --release
       - name: Upload the build artifact
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7
         with:
           name: x86_64_linux-gnu
           path: target/release/doas
       - name: Run tests
         run: cargo test && cargo +nightly miri test
+      - name: Rename binary for Release
+        if: github.event_name == 'release'
+        run: cp target/release/doas doas-${{ github.ref_name }}-x86_64-unknown-linux-gnu
+      - name: Upload Linux binary to Release
+        uses: softprops/action-gh-release@v3
+        if: github.event_name == 'release'
+        with:
+          files: doas-${{ github.ref_name }}-x86_64-unknown-linux-gnu
