@@ -11,6 +11,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: write
+
 jobs:
   build_on_macos:
     name: build on macOS
@@ -38,7 +41,7 @@ jobs:
         run: cargo build --release --features apple-auth
       - name: Rename binary for Release
         if: github.event_name == 'release'
-        run: cp target/release/doas doas-${{ github.ref_name }}-aarch64-apple-darwin(apple-auth)
+        run: cp target/release/doas "doas-${{ github.ref_name }}-aarch64-apple-darwin(apple-auth)"
       - name: Upload the build artifact
         uses: actions/upload-artifact@v7
         with:
