@@ -17,7 +17,7 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Pull code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install rustfmt
         run: rustup component add --toolchain nightly-aarch64-apple-darwin rustfmt
       - name: Install Miri
@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Pull code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install PAM development libraries
         run: sudo apt-get update && sudo apt-get install -y libpam0g-dev
       - name: Install rustfmt
