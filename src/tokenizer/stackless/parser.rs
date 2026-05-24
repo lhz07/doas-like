@@ -18,7 +18,7 @@ pub async fn tokenizer(co: &Val<State>, content: &str) {
                 skipping_comment = false;
             }
         }
-        if escaped {
+        if !quoted && escaped {
             match ch {
                 '\n' => line_count += 1,
                 _ => token.str.push(ch),
@@ -28,7 +28,7 @@ pub async fn tokenizer(co: &Val<State>, content: &str) {
         }
         if quoted {
             match ch {
-                '"' | '\\' => (),
+                '"' | '\\' | '\n' => (),
                 _ => {
                     token.str.push(ch);
                     continue;
@@ -47,7 +47,7 @@ pub async fn tokenizer(co: &Val<State>, content: &str) {
                 }
                 if !token_empty {
                     token_empty = true;
-                    co.yield_(State::NewLine(line_count)).await;
+                    co.yield_(State::NewLine(line_count, quoted)).await;
                 }
                 line_count += 1;
             }
@@ -112,7 +112,7 @@ pub async fn tokenizer(co: &Val<State>, content: &str) {
         .await;
     }
     if !token_empty {
-        co.yield_(State::NewLine(line_count)).await;
+        co.yield_(State::NewLine(line_count, quoted)).await;
     }
 }
 

@@ -1,4 +1,4 @@
-use std::{iter::Peekable, ops::Range};
+use std::{collections::HashSet, iter::Peekable, ops::Range, sync::LazyLock};
 
 #[cfg(feature = "nightly")]
 mod nightly;
@@ -13,7 +13,7 @@ pub use stackless::*;
 #[derive(Debug)]
 pub enum State {
     Token(Token, usize),
-    NewLine(usize),
+    NewLine(usize, bool),
 }
 
 #[derive(Debug, Default)]
@@ -39,12 +39,21 @@ pub struct Token {
     quoted: Option<Range<usize>>,
 }
 
+static KEYWORDS: LazyLock<HashSet<&str>> = LazyLock::new(|| {
+    ["permit", "deny", "as", "cmd", "args"]
+        .into_iter()
+        .collect()
+});
+
 impl Token {
     pub fn into_string(self) -> String {
         self.str
     }
-    pub fn is_key(&self, key: &str) -> bool {
+    pub fn equal_key(&self, key: &str) -> bool {
         self.as_str() == key && !self.quoted()
+    }
+    pub fn is_key(&self) -> bool {
+        !self.quoted() && KEYWORDS.contains(self.as_str())
     }
     pub fn as_str(&self) -> &str {
         &self.str
@@ -73,6 +82,7 @@ where
 {
     tokenizer: Peekable<T>,
     line: usize,
+    quoted: bool,
 }
 
 impl<T> Iterator for Tokenizer<T>
@@ -90,20 +100,28 @@ where
     T: Iterator<Item = State>,
 {
     pub fn new(tokenizer: Peekable<T>) -> Self {
-        Self { tokenizer, line: 1 }
+        Self {
+            tokenizer,
+            line: 1,
+            quoted: false,
+        }
     }
     pub fn line(&self) -> usize {
         self.line
     }
 
-    pub fn next_line(&mut self) -> bool {
-        self.peek().is_some()
+    pub fn next_line(&mut self) -> Result<bool, usize> {
+        if self.quoted {
+            return Err(self.line);
+        }
+        Ok(self.peek().is_some())
     }
 
     pub fn peek(&mut self) -> Option<&Token> {
         match self.tokenizer.peek()? {
-            State::NewLine(line) => {
+            State::NewLine(line, quoted) => {
                 self.line = *line;
+                self.quoted = *quoted;
                 None
             }
             State::Token(token, line) => {
@@ -115,8 +133,9 @@ where
 
     fn next_impl(&mut self) -> Option<Token> {
         match self.tokenizer.next()? {
-            State::NewLine(line) => {
+            State::NewLine(line, quoted) => {
                 self.line = line;
+                self.quoted = quoted;
                 None
             }
             State::Token(token, line) => {

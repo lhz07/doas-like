@@ -17,7 +17,7 @@ gen fn tokenizer(content: &str) -> State {
                 skipping_comment = false;
             }
         }
-        if escaped {
+        if !quoted && escaped {
             match ch {
                 '\n' => line_count += 1,
                 _ => token.str.push(ch),
@@ -27,7 +27,7 @@ gen fn tokenizer(content: &str) -> State {
         }
         if quoted {
             match ch {
-                '"' | '\\' => (),
+                '"' | '\\' | '\n' => (),
                 _ => {
                     token.str.push(ch);
                     continue;
@@ -42,7 +42,7 @@ gen fn tokenizer(content: &str) -> State {
                 }
                 if !token_empty {
                     token_empty = true;
-                    yield State::NewLine(line_count);
+                    yield State::NewLine(line_count, quoted);
                 }
                 line_count += 1;
             }
@@ -91,7 +91,7 @@ gen fn tokenizer(content: &str) -> State {
         yield State::Token(token.finish(quote_state.take_option()), line_count);
     }
     if !token_empty {
-        yield State::NewLine(line_count);
+        yield State::NewLine(line_count, quoted);
     }
 }
 

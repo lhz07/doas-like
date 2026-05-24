@@ -1,3 +1,8 @@
+use crate::{
+    c, errx, gen_tokenizer,
+    timestamp::FromStr as _,
+    tokenizer::{State, Tokenizer},
+};
 use libc::{gid_t, uid_t};
 use std::{
     borrow::Cow,
@@ -13,37 +18,38 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    c, errx, gen_tokenizer,
-    timestamp::FromStr as _,
-    tokenizer::{State, Tokenizer},
-};
-
 #[derive(Debug)]
 pub enum ConfigError<'a> {
     IO(io::Error, &'a Path),
     Permission(&'static str, &'a Path),
-    Syntax(Cow<'static, str>, usize, Box<ParsingConfig>),
+    Syntax(Cow<'static, str>, usize, Option<Box<ParsingConfig>>),
 }
 
 impl<'a> ConfigError<'a> {
-    fn syntax(err: Cow<'static, str>, line: usize, config: ParsingConfig) -> Self {
-        Self::Syntax(err, line, Box::new(config))
+    fn syntax(
+        err: Cow<'static, str>,
+        line: usize,
+        config: impl Into<Option<ParsingConfig>>,
+    ) -> Self {
+        let config = config.into();
+        Self::Syntax(err, line, config.map(Box::new))
     }
 }
 
 impl<'a> fmt::Display for ConfigError<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IO(e, path) => writeln!(f, "IO: {e}, file path: {}", path.display()),
+            Self::IO(e, path) => write!(f, "IO: {e}, file path: {}", path.display()),
             Self::Permission(e, path) => {
-                writeln!(f, "permission: {e}, file path: {}", path.display())
+                write!(f, "permission: {e}, file path: {}", path.display())
             }
-            Self::Syntax(e, line, parsing_config) => writeln!(
-                f,
-                "syntax: line {line}: {e}\nwhile parsing rule:\n\n{}",
-                parsing_config
-            ),
+            Self::Syntax(e, line, parsing_config) => {
+                write!(f, "syntax error at line {line}: {e}",)?;
+                if let Some(config) = parsing_config {
+                    write!(f, "\nwhile parsing rule:\n\n{}", config)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -175,28 +181,24 @@ impl Display for Options {
 impl Display for ParsingConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "action: ")?;
-        match self.action {
-            Some(action) => writeln!(f, "{:?}", action)?,
-            None => writeln!(f)?,
+        if let Some(action) = self.action {
+            write!(f, "{:?}", action)?;
         }
-
         if self.options != Options::default() {
-            writeln!(f, "options: {}", self.options)?;
+            write!(f, "\noptions: {}", self.options)?;
         }
 
-        write!(f, "identity: ")?;
-        match &self.identity {
-            Some(identity) => writeln!(f, "{}", identity)?,
-            None => writeln!(f)?,
+        write!(f, "\nidentity: ")?;
+        if let Some(identity) = &self.identity {
+            write!(f, "{}", identity)?;
         }
-
         if let Some(target) = &self.target {
-            writeln!(f, "target: {}", target)?;
+            write!(f, "\ntarget: {}", target)?;
         }
         if let Some(cmd) = &self.cmd {
-            writeln!(f, "cmd: {}", cmd.cmd)?;
+            write!(f, "\ncmd: {}", cmd.cmd)?;
             if let Some(args) = &cmd.cmd_args {
-                writeln!(f, "args: {:?}", args)?;
+                write!(f, "\nargs: {:?}", args)?;
             }
         }
         Ok(())
@@ -212,8 +214,8 @@ where
     let mut parsing_config = ParsingConfig::default();
     // there must be an action
     let action = match tokens.next() {
-        Some(s) if s.is_key("permit") => Action::Permit,
-        Some(s) if s.is_key("deny") => Action::Deny,
+        Some(s) if s.equal_key("permit") => Action::Permit,
+        Some(s) if s.equal_key("deny") => Action::Deny,
         _ => {
             return Err(ConfigError::syntax(
                 "missing action".into(),
@@ -237,9 +239,16 @@ where
                     tokens.next();
                 }
                 "persist" => {
+                    if parsing_config.options.persist.is_some() {
+                        return Err(ConfigError::syntax(
+                            "can't have two \"persist\" sections".into(),
+                            tokens.line(),
+                            parsing_config,
+                        ));
+                    }
                     tokens.next();
                     if let Some(s) = tokens.peek()
-                        && s.is_key("{")
+                        && s.equal_key("{")
                     {
                         tokens.next();
                         let Some(duration) = tokens.next() else {
@@ -260,7 +269,7 @@ where
                             }
                         }
                         if let Some(s) = tokens.next()
-                            && !s.is_key("}")
+                            && !s.equal_key("}")
                         {
                             return Err(ConfigError::syntax(
                                 "missing \"}\" after duration".into(),
@@ -285,8 +294,15 @@ where
                     tokens.next();
                 }
                 "setenv" => {
+                    if !parsing_config.options.envs.is_empty() {
+                        return Err(ConfigError::syntax(
+                            "can't have two \"setenv\" sections".into(),
+                            tokens.line(),
+                            parsing_config,
+                        ));
+                    }
                     tokens.next();
-                    if tokens.next().is_none_or(|s| !s.is_key("{")) {
+                    if tokens.next().is_none_or(|s| !s.equal_key("{")) {
                         return Err(ConfigError::syntax(
                             "missing envs after \"setenv\"".into(),
                             tokens.line(),
@@ -294,7 +310,7 @@ where
                         ));
                     }
                     while let Some(token) = tokens.next() {
-                        if token.is_key("}") {
+                        if token.equal_key("}") {
                             if parsing_config.options.envs.is_empty() {
                                 return Err(ConfigError::syntax(
                                     "missing envs inside \"{}\"".into(),
@@ -416,7 +432,20 @@ where
 
     // there must be an identity
     let identity_str = match tokens.next() {
-        Some(i) => i.into_string(),
+        Some(i) => {
+            if i.is_key() {
+                return Err(ConfigError::syntax(
+                    format!(
+                        "\"{}\" is a keyword, not an identity, consider wrapping it with double quotes (‘\"’) ",
+                        i.as_str()
+                    )
+                    .into(),
+                    tokens.line(),
+                    parsing_config,
+                ));
+            }
+            i.into_string()
+        }
         _ => {
             return Err(ConfigError::syntax(
                 "missing identity".into(),
@@ -450,12 +479,25 @@ where
 
     // optional target
     parsing_config.target = if let Some(token) = tokens.peek()
-        && token.is_key("as")
+        && token.equal_key("as")
     {
         tokens.next();
         // parse target
         match tokens.next() {
-            Some(target) => Some(target.into_string()),
+            Some(target) => {
+                if target.is_key() {
+                    return Err(ConfigError::syntax(
+                    format!(
+                        "\"{}\" is a keyword, not a target, consider wrapping it with double quotes (‘\"’) ",
+                        target.as_str()
+                    )
+                    .into(),
+                    tokens.line(),
+                    parsing_config,
+                ));
+                }
+                Some(target.into_string())
+            }
             None => {
                 return Err(ConfigError::syntax(
                     "missing target after \"as\"".into(),
@@ -470,7 +512,7 @@ where
 
     // optional cmd
     if let Some(token) = tokens.next() {
-        if !token.is_key("cmd") {
+        if !token.equal_key("cmd") {
             return Err(ConfigError::syntax(
                 "expected \"cmd\" before command".into(),
                 tokens.line(),
@@ -478,7 +520,20 @@ where
             ));
         }
         let cmd = match tokens.next() {
-            Some(s) => s.into_string(),
+            Some(s) => {
+                if s.is_key() {
+                    return Err(ConfigError::syntax(
+                    format!(
+                        "\"{}\" is a keyword, not a command, consider wrapping it with double quotes (‘\"’) ",
+                        s.as_str()
+                    )
+                    .into(),
+                    tokens.line(),
+                    parsing_config,
+                ));
+                }
+                s.into_string()
+            }
             None => {
                 return Err(ConfigError::syntax(
                     "missing command after \"cmd\"".into(),
@@ -494,7 +549,7 @@ where
         let cmd = parsing_config.cmd.insert(cmd);
         // optional args
         if let Some(arg) = tokens.next() {
-            if arg.is_key("args") {
+            if arg.equal_key("args") {
                 let args = tokens.by_ref().map(|t| t.into_string()).collect();
                 cmd.cmd_args = Some(args);
             } else {
@@ -577,7 +632,10 @@ impl Config {
         let mut rules = Vec::new();
         gen_tokenizer!(tokenizer, &content);
 
-        while tokenizer.next_line() {
+        while tokenizer
+            .next_line()
+            .map_err(|line| ConfigError::syntax("unterminated quotes".into(), line, None))?
+        {
             let rule = parser(&mut tokenizer)?;
             rules.push(rule);
         }
@@ -688,7 +746,7 @@ pub fn check_config(
     c::setreuid(uid, uid)?;
     let rules = match Config::parse(path, false) {
         Ok(c) => c,
-        Err(e) => errx!("config error: {e}"),
+        Err(e) => errx!("{e}"),
     };
     if cmds.is_empty() {
         println!("the configuration file syntax is ok");
