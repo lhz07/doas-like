@@ -162,7 +162,7 @@ impl Display for Options {
             write!(f, "persist {{{:?}}} ", dur)?;
         }
         if !self.envs.is_empty() {
-            write!(f, "setenv\nenvs: {{ ")?;
+            write!(f, "setenv {{ ")?;
             for env in self.envs.iter() {
                 write!(f, "{env} ")?;
             }
@@ -177,7 +177,7 @@ impl Display for ParsingConfig {
         write!(f, "action: ")?;
         match self.action {
             Some(action) => writeln!(f, "{:?}", action)?,
-            None => writeln!(f, "None")?,
+            None => writeln!(f)?,
         }
 
         if self.options != Options::default() {
@@ -187,7 +187,7 @@ impl Display for ParsingConfig {
         write!(f, "identity: ")?;
         match &self.identity {
             Some(identity) => writeln!(f, "{}", identity)?,
-            None => writeln!(f, "None")?,
+            None => writeln!(f)?,
         }
 
         if let Some(target) = &self.target {
