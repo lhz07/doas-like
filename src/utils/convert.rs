@@ -1,29 +1,49 @@
+use crate::utils::{array::ArrayRef, fmt::Part};
 use std::{
     ffi::{CStr, CString, OsString},
+    fmt::Display,
+    io::Write as _,
     marker::PhantomData,
     os::unix::ffi::OsStrExt as _,
     path::PathBuf,
+    ptr::NonNull,
 };
 
-use crate::utils::{array::Array, fmt::Part};
-
-pub struct CArgs<'b, const PARTS: usize, const ARGS: usize> {
-    pub parts: Array<PARTS, Part<'static>>,
-    pub args: [FmtWriter<'b>; ARGS],
+pub struct CArgs<'a, const ARGS: usize> {
+    pub parts: &'static ArrayRef<Part<'static>>,
+    pub args: [FmtWriter<'a>; ARGS],
     pub count: usize,
 }
 
-type WriteFn = unsafe fn(data: *const (), len: usize, buf: &mut Vec<u8>);
+type WriteFn = unsafe fn(data: NonNull<()>, len: usize, buf: &mut Vec<u8>);
 
 pub struct FmtWriter<'a> {
-    data: *const (),
+    data: NonNull<()>,
     len: usize,
     write: WriteFn,
     _life: PhantomData<&'a ()>,
 }
 
 impl<'a> FmtWriter<'a> {
-    unsafe fn new<T: ?Sized>(data: *const (), len: usize, write: WriteFn, _life: &'a T) -> Self {
+    fn new_bytes(bytes: &'a [u8]) -> Self {
+        unsafe fn general_write(data: NonNull<()>, len: usize, buf: &mut Vec<u8>) {
+            unsafe {
+                let data: NonNull<u8> = data.cast();
+                let slice = core::slice::from_raw_parts(data.as_ptr(), len);
+                buf.extend(slice);
+            }
+        }
+        let data = NonNull::from_ref(bytes).cast();
+        Self {
+            data,
+            len: bytes.len(),
+            write: general_write,
+            _life: PhantomData,
+        }
+    }
+
+    unsafe fn new_ref<T>(x: &'a T, len: usize, write: WriteFn) -> Self {
+        let data = NonNull::from_ref(x).cast();
         Self {
             data,
             len,
@@ -43,66 +63,48 @@ impl<'a> FmtWriter<'a> {
     }
 }
 
-unsafe fn general_write(data: *const (), len: usize, buf: &mut Vec<u8>) {
-    unsafe {
-        let data = data as *const u8;
-        let slice = core::slice::from_raw_parts(data, len);
-        buf.extend(slice);
-    }
-}
-
 pub trait WriteToBytes<'a> {
     fn get_writer(&'a self) -> FmtWriter<'a>;
 }
 
 impl<'a> WriteToBytes<'a> for CStr {
     fn get_writer(&'a self) -> FmtWriter<'a> {
-        let data = self.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, self.count_bytes(), general_write, self) }
+        let bytes = self.to_bytes();
+        FmtWriter::new_bytes(bytes)
     }
 }
 
 impl<'a> WriteToBytes<'a> for CString {
     fn get_writer(&'a self) -> FmtWriter<'a> {
-        let data = self.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, self.count_bytes(), general_write, self) }
+        let bytes = self.to_bytes();
+        FmtWriter::new_bytes(bytes)
     }
 }
 
 impl<'a> WriteToBytes<'a> for OsString {
     fn get_writer(&'a self) -> FmtWriter<'a> {
         let bytes = self.as_bytes();
-        let data = bytes.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, bytes.len(), general_write, bytes) }
+        FmtWriter::new_bytes(bytes)
     }
 }
 
 impl<'a> WriteToBytes<'a> for PathBuf {
     fn get_writer(&'a self) -> FmtWriter<'a> {
         let bytes = self.as_os_str().as_bytes();
-        let data = bytes.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, bytes.len(), general_write, bytes) }
+        FmtWriter::new_bytes(bytes)
     }
 }
 
 impl<'a> WriteToBytes<'a> for [u8] {
     fn get_writer(&'a self) -> FmtWriter<'a> {
-        let data = self.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, self.len(), general_write, self) }
+        FmtWriter::new_bytes(self)
     }
 }
 
-impl<'a, const N: usize, const S: usize> WriteToBytes<'a> for CArgs<'a, N, S> {
+impl<'a, const N: usize> WriteToBytes<'a> for CArgs<'a, N> {
     fn get_writer(&'a self) -> FmtWriter<'a> {
-        unsafe fn write<const N: usize, const S: usize>(
-            data: *const (),
-            _len: usize,
-            buf: &mut Vec<u8>,
-        ) {
-            let me = unsafe {
-                let data = data as *const CArgs<'_, N, S>;
-                &*data
-            };
+        unsafe fn write<const N: usize>(data: NonNull<()>, _len: usize, buf: &mut Vec<u8>) {
+            let me: &CArgs<'_, N> = unsafe { data.cast().as_ref() };
             let mut args = me.args.iter();
             for part in me.parts.as_slice() {
                 match part {
@@ -118,8 +120,8 @@ impl<'a, const N: usize, const S: usize> WriteToBytes<'a> for CArgs<'a, N, S> {
                 }
             }
         }
-        let data = self as *const _ as *const ();
-        unsafe { FmtWriter::new(data, self.count, write::<N, S>, self) }
+
+        unsafe { FmtWriter::new_ref(self, self.count, write::<N>) }
     }
 }
 
@@ -129,11 +131,14 @@ pub trait WriteStrToBytes<'a> {
 
 impl<'a, T> WriteStrToBytes<'a> for T
 where
-    T: AsRef<str>,
+    T: Display,
 {
     fn get_writer(&'a self) -> FmtWriter<'a> {
-        let str = self.as_ref();
-        let data = str.as_ptr() as *const ();
-        unsafe { FmtWriter::new(data, str.len(), general_write, str) }
+        unsafe fn display_write<T: Display>(ptr: NonNull<()>, _len: usize, buf: &mut Vec<u8>) {
+            let r = unsafe { ptr.cast::<T>().as_ref() };
+            let _ = write!(buf, "{}", r);
+        }
+
+        unsafe { FmtWriter::new_ref(self, 1, display_write::<T>) }
     }
 }

@@ -169,7 +169,6 @@ macro_rules! c_format{
             }
         }
         buf.push(0);
-        debug_assert_eq!(count, buf.len(), "exact estimate!");
         // Safety: we have replaced all nul bytes and pushed a `0` at the end.
         #[allow(unused_unsafe)]
         unsafe { CString::from_vec_with_nul_unchecked(buf) }
@@ -202,7 +201,7 @@ macro_rules! c_format_args{
         }),* ];
 
         CArgs{
-            parts: PARTS,
+            parts: PARTS.as_array_ref(),
             args: arrays,
             count,
         }
@@ -235,4 +234,12 @@ fn format_args() {
     let a = c_format_args!("hello, {}", c);
     let cstr = c_format!("doas: {}", a);
     assert_eq!(c"doas: hello, world", &cstr);
+}
+
+#[test]
+fn format_display_args() {
+    let c = "world".to_string();
+    let a = c_format_args!("hello, {}", c);
+    let cstr = c_format!("doas: {}, {}", a, 123);
+    assert_eq!(c"doas: hello, world, 123", &cstr);
 }
