@@ -3,12 +3,16 @@ use doas::{
     c::{self},
     command::CmdArgs,
     config::{Config, check_config, permit},
-    errx, sys, syslog, timestamp, verify, warnx,
+    errx,
+    sys::{self},
+    syslog,
+    timestamp::{self},
+    verify, vidoas, warnx,
 };
 use libc::{LOG_AUTHPRIV, LOG_INFO, LOG_NOTICE, gid_t};
 use std::{
     env,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     os::unix::{ffi::OsStrExt as _, process::CommandExt as _},
     process,
 };
@@ -45,11 +49,16 @@ fn inner_main() -> Result<(), ()> {
                 vec![sh]
             }
         }
+    } else if args.vidoas {
+        let cmd = env::var_os("EDITOR").unwrap_or_else(|| OsString::from("vim"));
+        vec![cmd, OsString::from(CONF_PATH)]
     } else {
         args.command
     };
 
     if let Some(path) = args.config {
+        // downgrade to real uid.
+        c::setreuid(real_uid, real_uid)?;
         return check_config(
             path.as_ref(),
             real_uid,
@@ -57,7 +66,9 @@ fn inner_main() -> Result<(), ()> {
             target_uid,
             &argvs,
             args.verbose,
-        );
+            false,
+        )
+        .map_err(|_| ());
     }
 
     let cmdline = argvs.join(" ".as_ref());
@@ -139,16 +150,27 @@ fn inner_main() -> Result<(), ()> {
     .ok_or_else(|| warnx!("{:?}: command not found", cmd))?;
 
     let envs = c::prep_env(&mypw, &target_pw, rule);
-
-    let err = process::Command::new(&cmd)
-        .args(cmd_args)
-        .env_clear()
-        .envs(envs)
-        .exec();
-    if err.kind() == std::io::ErrorKind::NotFound {
-        errx!("{:?}: command not found", cmd);
+    if args.vidoas {
+        vidoas::run(
+            real_uid,
+            &groups,
+            target_uid,
+            &cmd,
+            &argvs,
+            envs,
+            &mypw.pw_name,
+        )
+    } else {
+        let err = process::Command::new(&cmd)
+            .args(cmd_args)
+            .env_clear()
+            .envs(envs)
+            .exec();
+        if err.kind() == std::io::ErrorKind::NotFound {
+            errx!("{:?}: command not found", cmd);
+        }
+        errx!("exec failed: {err}");
     }
-    errx!("exec failed: {err}");
 }
 
 fn main() -> process::ExitCode {

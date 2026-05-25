@@ -83,7 +83,7 @@ pub fn clear() -> Result<(), ()> {
 
 #[derive(Debug, Clone, Copy)]
 #[repr(transparent)]
-pub struct Time(timespec);
+pub struct Time(pub timespec);
 
 impl ops::Deref for Time {
     type Target = timespec;

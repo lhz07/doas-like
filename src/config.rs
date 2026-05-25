@@ -1,7 +1,8 @@
 use crate::{
-    c, errx, gen_tokenizer,
+    c, gen_tokenizer,
     timestamp::FromStr as _,
     tokenizer::{State, Tokenizer},
+    warnx,
 };
 use libc::{gid_t, uid_t};
 use std::{
@@ -12,7 +13,7 @@ use std::{
     io::{self, Read as _},
     os::unix::{
         ffi::OsStrExt as _,
-        fs::{MetadataExt as _, PermissionsExt as _},
+        fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _},
     },
     path::Path,
     time::Duration,
@@ -46,7 +47,7 @@ impl<'a> fmt::Display for ConfigError<'a> {
             Self::Syntax(e, line, parsing_config) => {
                 write!(f, "syntax error at line {line}: {e}",)?;
                 if let Some(config) = parsing_config {
-                    write!(f, "\nwhile parsing rule:\n\n{}", config)?;
+                    write!(f, "\nwhile parsing rule:\n{}", config)?;
                 }
                 Ok(())
             }
@@ -168,11 +169,11 @@ impl Display for Options {
             write!(f, "persist {{{:?}}} ", dur)?;
         }
         if !self.envs.is_empty() {
-            write!(f, "setenv {{ ")?;
+            writeln!(f, "\n  setenv {{ ")?;
             for env in self.envs.iter() {
-                write!(f, "{env} ")?;
+                writeln!(f, "    {env}")?;
             }
-            write!(f, "}}")?;
+            write!(f, "  }}")?;
         }
         Ok(())
     }
@@ -180,25 +181,29 @@ impl Display for Options {
 
 impl Display for ParsingConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "action: ")?;
-        if let Some(action) = self.action {
-            write!(f, "{:?}", action)?;
+        write!(f, "  action: ")?;
+        match self.action {
+            Some(action) => write!(f, "{:?}", action)?,
+
+            None => write!(f, "<missing>")?,
         }
         if self.options != Options::default() {
-            write!(f, "\noptions: {}", self.options)?;
+            write!(f, "\n  options: {}", self.options)?;
         }
 
-        write!(f, "\nidentity: ")?;
-        if let Some(identity) = &self.identity {
-            write!(f, "{}", identity)?;
+        write!(f, "\n  identity: ")?;
+        match &self.identity {
+            Some(identity) => write!(f, "{}", identity)?,
+
+            None => write!(f, "<missing>")?,
         }
         if let Some(target) = &self.target {
-            write!(f, "\ntarget: {}", target)?;
+            write!(f, "\n  target: {}", target)?;
         }
         if let Some(cmd) = &self.cmd {
-            write!(f, "\ncmd: {}", cmd.cmd)?;
+            write!(f, "\n  cmd: {}", cmd.cmd)?;
             if let Some(args) = &cmd.cmd_args {
-                write!(f, "\nargs: {:?}", args)?;
+                write!(f, "\n  args: {:?}", args)?;
             }
         }
         Ok(())
@@ -605,7 +610,11 @@ fn check_uid(uid: uid_t, desired: &str) -> Result<(), ()> {
 
 impl Config {
     pub fn parse<'a>(path: &'a Path, check_perm: bool) -> Result<Vec<Config>, ConfigError<'a>> {
-        let mut file = fs::File::open(path).map_err(|e| ConfigError::IO(e, path))?;
+        let mut file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+            .map_err(|e| ConfigError::IO(e, path))?;
         if check_perm {
             // check file permission
             let meta = file.metadata().map_err(|e| ConfigError::IO(e, path))?;
@@ -734,26 +743,42 @@ pub fn permit(
     })
 }
 
-pub fn check_config(
-    path: &Path,
+pub enum CheckErr<'a> {
+    Config(ConfigError<'a>),
+    Deny(Option<Box<Config>>),
+}
+
+pub fn check_config<'a>(
+    path: &'a Path,
     uid: uid_t,
     groups: &[gid_t],
     target: uid_t,
     cmds: &[OsString],
     verbose: bool,
-) -> Result<(), ()> {
-    // downgrade to real uid.
-    c::setreuid(uid, uid)?;
+    silent: bool,
+) -> Result<(), CheckErr<'a>> {
     let rules = match Config::parse(path, false) {
         Ok(c) => c,
-        Err(e) => errx!("{e}"),
+        Err(e) => {
+            if !silent {
+                warnx!("{e}");
+            }
+            return Err(CheckErr::Config(e));
+        }
     };
     if cmds.is_empty() {
+        if silent {
+            return Ok(());
+        }
         println!("the configuration file syntax is ok");
         if verbose {
-            println!("parsed config:\n");
-            for rule in rules {
+            println!("parsed config:");
+            let len = rules.len();
+            for (i, rule) in rules.into_iter().enumerate() {
                 println!("{}", ParsingConfig::from(rule));
+                if len > 1 && i < len - 1 {
+                    println!("  ---------------");
+                }
             }
         }
         return Ok(());
@@ -772,22 +797,28 @@ pub fn check_config(
     let result;
     if let Some(r) = last_rule {
         if matches!(r.action, Action::Permit) {
-            println!("permit{}", if r.options.nopass { " nopass" } else { "" });
+            if !silent {
+                println!("permit{}", if r.options.nopass { " nopass" } else { "" });
+            }
             result = Ok(());
         } else {
+            if silent {
+                return Err(CheckErr::Deny(Some(Box::new(r))));
+            }
             println!("deny");
-            result = Err(());
+            result = Err(CheckErr::Deny(None));
         }
-        if verbose {
-            println!("matched rule:\n");
+        if !silent && verbose {
+            println!("matched rule:");
             println!("{}", ParsingConfig::from(r));
         }
     } else {
-        println!("deny");
-        result = Err(());
-
-        if verbose {
-            println!("no matched rule");
+        result = Err(CheckErr::Deny(None));
+        if !silent {
+            println!("deny");
+            if verbose {
+                println!("no matched rule");
+            }
         }
     }
 

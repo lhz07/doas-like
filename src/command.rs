@@ -5,7 +5,7 @@ use std::{
     process,
 };
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct CmdArgs {
     /// Config path
     ///
@@ -14,6 +14,8 @@ pub struct CmdArgs {
     /// ‘permit nopass’ or ‘deny’ will be printed on standard output, depending on
     /// command matching results. No command is executed.
     pub config: Option<OsString>,
+
+    pub vidoas: bool,
 
     pub verbose: bool,
 
@@ -67,12 +69,17 @@ impl CmdArgs {
                     // skip "--"
                     args.next();
                     // pass values directly
-                    return parsed.extend_cmds(args);
+                    parsed.extend_cmds(args)?;
+                    break;
                 }
                 b"--version" => {
                     println!("doas {}", VERSION);
                     list_features!("apple-auth", "nightly");
                     process::exit(0);
+                }
+                b"vidoas" => {
+                    args.next();
+                    parsed.vidoas = true;
                 }
                 [b'-', _] => {
                     let option = args.next().unwrap().as_bytes()[1];
@@ -88,7 +95,8 @@ impl CmdArgs {
                 }
                 _ => {
                     // no option matches, pass values directly
-                    return parsed.extend_cmds(args);
+                    parsed.extend_cmds(args)?;
+                    break;
                 }
             }
         }
@@ -102,7 +110,20 @@ impl CmdArgs {
                 || parsed.non_interactive
                 || parsed.verbose)
         {
-            eprintln!("'-L' cannot be used with other options");
+            eprintln!("'-L' cannot be used with other options or commands");
+            usage!();
+        }
+
+        if parsed.vidoas
+            && (!parsed.command.is_empty()
+                || parsed.shell
+                || parsed.clear
+                || parsed.user.is_some()
+                || parsed.config.is_some()
+                || parsed.non_interactive
+                || parsed.verbose)
+        {
+            eprintln!("'vidoas' cannot be used with other options or commands");
             usage!();
         }
         if parsed.verbose && parsed.config.is_none() {
@@ -116,7 +137,12 @@ impl CmdArgs {
             usage!();
         }
 
-        if !parsed.shell && !parsed.clear && parsed.config.is_none() && parsed.command.is_empty() {
+        if !parsed.vidoas
+            && !parsed.shell
+            && !parsed.clear
+            && parsed.config.is_none()
+            && parsed.command.is_empty()
+        {
             eprintln!("missing command");
             usage!();
         }
@@ -198,7 +224,7 @@ impl CmdArgs {
         Ok(())
     }
 
-    fn extend_cmds(mut self, args: impl Iterator<Item = OsString>) -> Result<Self, ()> {
+    fn extend_cmds(&mut self, args: impl Iterator<Item = OsString>) -> Result<(), ()> {
         if self.shell {
             eprintln!("'-s' cannot be used with command");
             usage!();
@@ -208,6 +234,6 @@ impl CmdArgs {
             usage!();
         }
         self.command.extend(args);
-        Ok(self)
+        Ok(())
     }
 }

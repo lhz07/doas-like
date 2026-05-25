@@ -14,10 +14,12 @@ pub mod timestamp;
 pub mod tokenizer;
 pub mod utils;
 pub mod verify;
+pub mod vidoas;
 
 pub const CNAME: &CStr = c"doas";
 pub const NAME: &str = "doas";
 pub const CONF_PATH: &str = "/etc/doas.conf";
+pub const TEMP_CONF_PATH: &str = "/etc/doas.tmp";
 pub const SAFE_PATH: &str = "/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin";
 pub const PATH_KEY: &str = "PATH";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
